@@ -60,8 +60,11 @@ dsh plugin add dsh-next-steps
 
 ## 开发与自检
 
-- `_test-next-steps.mjs`（工作区根目录）：用假 React/假 ctx 驱动真实组件，覆盖逐轮投影、不继承上一轮、`latest`/`all` 两种模式、1/3 条跨列、缓存失效、跨会话隔离、兜底通道。
-- `_test-normalize.mjs`：从 `index.js` 里抽出 `normalizeActions` 直接跑，覆盖推荐置顶、`stop` 沉底、去重、截断、非法输入过滤。
+三个脚本都在本包目录内，路径按脚本自身位置解析，从任何目录跑都可以：
+
+- `_test-next-steps.mjs`（9 项）：用假 React/假 ctx 驱动真实组件，覆盖逐轮投影、不继承上一轮、`latest`/`all` 两种模式、1/3 条跨列、缓存失效、跨会话隔离、兜底通道。
+- `_test-normalize.mjs`（5 项）：从 `index.js` 里抽出 `normalizeActions` 直接跑，覆盖推荐置顶、`stop` 沉底、去重、截断、非法输入过滤。
+- `_test-host.mjs`（5 项）：假 ctx 跑 Host 半边，验证工具注册、常驻提示的 section 顺序、`prompt: off` 时不注册。
 
 ## License
 
