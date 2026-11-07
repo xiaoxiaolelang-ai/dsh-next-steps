@@ -1,0 +1,7 @@
+# 下一步建议（dsh-next-steps）：把本插件作为一行插入当前 profile。
+- insert:
+    - id: next-steps
+      name: 'dsh-next-steps'
+      config:
+        maxActions: 4
+        history: latest

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Next steps",
+    "description": "A 2x2 grid of four clickable next-step suggestions under each reply, projected per turn, with the recommended one accented."
+  }
+}

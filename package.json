@@ -1,0 +1,55 @@
+{
+  "name": "dsh-next-steps",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Per-turn next-step suggestions under each reply: a 2x2 grid of up to four clickable actions, each turn projected from its own tool result.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "suggestions",
+    "next-steps",
+    "ui"
+  ],
+  "license": "MIT",
+  "author": "xiaoxiaolelang-ai",
+  "engines": {
+    "dsh": ">=0.2.2-rc.1",
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-chat",
+        "@deepseek-ai/dsh-client-ui-tool"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaoxiaolelang-ai/dsh-next-steps.git"
+  },
+  "homepage": "https://github.com/xiaoxiaolelang-ai/dsh-next-steps#readme",
+  "bugs": {
+    "url": "https://github.com/xiaoxiaolelang-ai/dsh-next-steps/issues"
+  }
+}
