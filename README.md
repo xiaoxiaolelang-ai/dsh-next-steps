@@ -83,4 +83,18 @@ Suggestions are **projected per turn**: each turn tail reads only its own turn's
 
 Interaction: click sends the text as your message; **Shift+click** only fills the composer; buttons disable after a click; failures are shown, never swallowed.
 
+### Configuration
+
+In the profile's `cordis.patch.yml`, on this plugin's row:
+
+```yaml
+- id: next-steps
+  config:
+    maxActions: 4      # 1-4, default 4
+    history: latest    # latest = newest turn only (default); all = every turn keeps its own
+    prompt: always     # always = register a standing instruction so the tool is called every turn; off = don't
+```
+
+Suggestions come from the turn's own tool call. With `prompt: always` the model is asked to call `suggest_actions` at the end of every reply; if a turn still has no call, that turn simply shows nothing — it never borrows the previous turn's buttons.
+
 Requires DSH `>= 0.2.2-rc.1`. Zero dependencies. Only one plugin that adds rows to the turn tail should be enabled at a time. MIT.
