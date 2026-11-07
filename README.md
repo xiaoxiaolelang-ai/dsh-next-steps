@@ -38,7 +38,12 @@ dsh plugin add dsh-next-steps
   config:
     maxActions: 4      # 1-4，默认 4
     history: latest    # latest=只在最新一轮显示（默认）；all=每轮都显示当轮的建议
+    prompt: always     # always=注册一条常驻指令，让模型每轮收尾都调用工具；off=不注册
 ```
+
+## 为什么某轮可能没有按钮
+
+建议不是插件凭空生成的，它来自**这一轮的工具调用结果**。插件会注册一条常驻提示（`prompt: always`），要求模型在收尾时调用 `suggest_actions`；但如果某一轮模型没调用，那一轮就确实什么都不显示——这是刻意的：绝不把上一轮的按钮顶上来充数。
 
 ## 原理与兼容
 

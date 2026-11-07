@@ -27,6 +27,14 @@ const description = [
   'This never waits for an answer: it returns immediately and your turn ends normally.',
 ].join(' ')
 
+/** 常驻提示：让模型每轮都调用一次工具，而不是靠它自己记得。 */
+const PROMPT_TEXT = [
+  "End the reply with the `suggest_actions` tool: 2-4 clickable next steps the user might take,",
+  "at most one entry per stance, exactly one marked `recommended`. Phrase each as the action it performs.",
+  "Skip it only when the reply is a bare acknowledgement or the user asked a pure factual question",
+  "with no sensible next move.",
+].join(" ")
+
 const parameters = {
   type: 'object',
   additionalProperties: false,
@@ -91,6 +99,22 @@ function apply(ctx, config) {
   const rawMax = Number(config?.maxActions)
   const maxActions = Number.isInteger(rawMax) && rawMax > 0 ? rawMax : MAX_ACTIONS
   const history = config?.history === 'all' ? 'all' : 'latest'
+
+  const promptMode = config?.prompt === "off" ? "off" : "always"
+  if (promptMode === "always") {
+    const systemPrompt = ctx.get("systemPrompt")
+    if (systemPrompt !== undefined && systemPrompt !== null && typeof systemPrompt.section === "function") {
+      // 9500：排在工具说明之后、交付物与结构化输出之前，属于"收尾要求"这一档。
+      // 包一层：万一别的插件占了同名 section 或宿主 API 变了，也不能连累工具注册。
+      try {
+        ctx.effect(
+          () => systemPrompt.section({ name: "next-steps", order: 9500, text: PROMPT_TEXT }),
+          "dsh-next-steps: prompt section",
+        )
+      } catch {}
+
+    }
+  }
 
   ctx.tools.register({
     name: 'suggest_actions',
