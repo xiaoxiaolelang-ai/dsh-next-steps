@@ -2,9 +2,9 @@
 
 在每轮回复下方给出一组可点的下一步建议：**2×2 最多四格**，每一条都只属于它自己那一轮。
 
-这个插件是被 `dsh-suggest-actions` 的一个结构性缺陷逼出来的——那个插件把建议按「会话」存了一份，轮次尾部组件又只在挂载时读一次快照，于是**新一轮会拿到上一轮的按钮并永久冻结**，看起来就是"每轮都一样"。这里换掉了那个数据模型，而不是打补丁。
+建议是**按轮次投影**出来的：每个轮次尾部只读它自己那一轮的工具结果，所以历史轮次各自定格、新的一轮不会继承上一轮的按钮，晚到的结果也会触发重渲染。
 
-## 和其它同类插件的区别
+## 设计取舍
 
 - **按轮次投影，不共享状态。** 每个轮次尾部只回答一个问题：「在（本轮起点, 本轮收尾] 之间，有没有一条 `suggest_actions` 结果？」历史轮次各自定格在自己那一组，晚到的结果也会触发重渲染。没有 Map、没有 render 副作用、没有跨组件传递。
 - **2×2 版式。** 一次最多四条：1 条整宽、2 条一行、3 条末条跨列、4 条标准 2×2。超过四条在 host 侧直接截断，不做"还有 N 条"——那会破坏版式。
@@ -27,7 +27,7 @@ dsh plugin add dsh-next-steps
 
 或者插件管理器里添加 `dsh-next-steps`。
 
-> 与 `dsh-suggest-actions` **互斥**：两个都往 `conversation.chat.turnTail` 注册，同时启用会出现两排按钮。装本插件前先禁用前者。
+> 同一个「轮次尾部」如果还有别的插件也往里放建议按钮，会出现两排；那种情况下同一时间只启用一个。
 
 ## 配置
 
@@ -68,7 +68,7 @@ MIT
 
 Clickable next-step suggestions under each reply: up to four, in a 2x2 grid, and **each turn only ever shows its own suggestions**.
 
-This exists because `dsh-suggest-actions` has a structural defect: it stores suggestions per session and the turn-tail component reads that snapshot once at mount, so every new turn adopts the previous turn's buttons and freezes. Here the data model is replaced, not patched.
+Suggestions are **projected per turn**: each turn tail reads only its own turn's tool result, so historical turns keep their own set and a new turn never inherits the previous one's buttons.
 
 - **Per-turn projection.** Each turn tail answers one question — *is there a `suggest_actions` result inside (this turn's start, this turn's end]?* Historical turns keep their own set; late results re-render. No shared map, no render-phase side effects, no cross-component handoff.
 - **2x2 layout.** One entry spans the row, two sit side by side, three give the last one a full row, four make a clean 2x2. Anything beyond four is truncated host-side.
@@ -78,4 +78,4 @@ This exists because `dsh-suggest-actions` has a structural defect: it stores sug
 
 Interaction: click sends the text as your message; **Shift+click** only fills the composer; buttons disable after a click; failures are shown, never swallowed.
 
-Requires DSH `>= 0.2.2-rc.1`. Mutually exclusive with `dsh-suggest-actions`. Zero dependencies. MIT.
+Requires DSH `>= 0.2.2-rc.1`. Zero dependencies. Only one plugin that adds rows to the turn tail should be enabled at a time. MIT.
