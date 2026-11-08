@@ -94,4 +94,19 @@ assert.equal(typeof mod.installProjection, 'function')
 assert.equal(mod.installProjection(legacy, 4), false, '没有服务时 installProjection 返回 false')
 console.log('OK  旧宿主降级：无 sessionProjections 时不注册也不抛')
 
+// 7) 回归：宿主会直接调 stateSchema.parse / viewSchema.parse —— 缺了就是整段会话加载失败
+assert.ok(captured.stateSchema !== undefined && typeof captured.stateSchema.parse === 'function', 'unit 必须带 stateSchema.parse')
+assert.ok(captured.wire.viewSchema !== undefined && typeof captured.wire.viewSchema.parse === 'function', 'wire 必须带 viewSchema.parse')
+assert.doesNotThrow(() => captured.stateSchema.parse({ items: [], mode: 'latest' }))
+assert.doesNotThrow(() => captured.wire.viewSchema.parse(captured.wire.view(afterPtc)))
+const repaired = captured.stateSchema.parse({ garbage: true })
+assert.deepEqual(repaired.items, [], '坏状态必须被修成合法空状态')
+assert.ok(repaired.mode === 'latest' || repaired.mode === 'all', '修出来的状态必须带合法 mode')
+console.log('OK  schema：宿主需要的 parse 都在，坏状态被修成合法空状态')
+
+// 8) 开关：projection: off 时完全不注册
+assert.equal(mod.installProjection(ctx, 4, 'latest', false), false, 'projection: off 必须跳过注册')
+assert.equal(mod.installProjection(ctx, 4, 'latest', true), true, 'projection 开启时注册')
+console.log('OK  开关：projection=off 时不注册（不必禁用整个插件）')
+
 console.log('\nprojection checks passed')

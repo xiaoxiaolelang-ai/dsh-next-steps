@@ -1,0 +1,21 @@
+fix: the projection unit must provide stateSchema and viewSchema (0.2.0)
+
+线上事故：启用 0.2.0 后整段会话报
+"历史加载失败：failed to project session … Cannot read properties of undefined
+(reading 'parse')"，禁用插件才恢复。
+
+根因：宿主对每个投影单元会直接调用
+  stateSchema.parse(row.val)
+  wire.viewSchema.parse(wire.view(state))
+而第一版只给了 key / stateVersion / init / apply / wire.view —— 两个 schema 都是
+undefined，读取投影时立刻抛错，整段会话的历史都读不出来。
+
+修法：
+- 补 duck-typed 的 stateSchema / wire.viewSchema（只实现宿主用到的 .parse，
+  形状不对就回退成合法空状态，不抛错）；
+- 加 projection: on/off 开关（YAML 裸写的 on/off 会被解析成布尔，两种都认），
+  出问题关掉投影即可，不必禁用整个插件；
+- 测试补回归：断言两个 schema 的 parse 存在且可调用、坏状态被修成合法空状态、
+  projection=off 时不注册。
+
+自检 41 项：13 / 5 / 5 / 9 / 9。
