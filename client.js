@@ -488,15 +488,28 @@ window.__ModuleLoader__.load({
             return undefined
           }
           let alive = true
-          fetchFallbackActions(sessionId).then((actions) => {
-            if (!alive || actions === null) return
-            if (fallbackCache.size > 40) {
-              const oldest = fallbackCache.keys().next()
-              if (oldest.done !== true) fallbackCache.delete(oldest.value)
+          /* 宿主是在轮次关闭前开始生成的（实测 3-5 秒），首次取很可能还是空的，
+             所以按固定间隔重试几次，取到就停。 */
+          const retryMs = Number(globalThis.__dnsRetryMs) > 0 ? Number(globalThis.__dnsRetryMs) : 1200
+          const attempts = 6
+          const run = async () => {
+            for (let attempt = 0; attempt < attempts; attempt += 1) {
+              if (!alive) return
+              const actions = await fetchFallbackActions(sessionId)
+              if (!alive) return
+              if (actions !== null) {
+                if (fallbackCache.size > 40) {
+                  const oldest = fallbackCache.keys().next()
+                  if (oldest.done !== true) fallbackCache.delete(oldest.value)
+                }
+                fallbackCache.set(cacheKey, actions)
+                setRemote({ endSeq, actions })
+                return
+              }
+              await new Promise((resolve) => setTimeout(resolve, retryMs))
             }
-            fallbackCache.set(cacheKey, actions)
-            setRemote({ endSeq, actions })
-          })
+          }
+          void run()
           return () => {
             alive = false
           }

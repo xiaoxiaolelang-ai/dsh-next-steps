@@ -201,7 +201,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.16', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.17', mode: history, actions }),
           },
         ]
       },
@@ -357,12 +357,14 @@ function installRoute(ctx) {
           const url = new URL(String(request?.url ?? ACTIONS_PATH), 'http://dsh.local')
           const sessionId = url.searchParams.get('session') ?? ''
           const actions = latestFallback(sessionId)
+          reportTurn('route-hit', 'session=' + sessionId.slice(0, 24) + ' n=' + (actions === null ? 0 : actions.length))
           return jsonResponse({ actions: actions === null ? [] : actions })
         } catch {
           return jsonResponse({ actions: [] })
         }
       },
     }), 'dsh-next-steps: actions route')
+    reportTurn('route', 'registered')
     return true
   } catch (error) {
     reportTurn('route', 'failed: ' + (error instanceof Error ? error.message : String(error)))

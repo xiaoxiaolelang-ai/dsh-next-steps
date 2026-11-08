@@ -246,4 +246,26 @@ console.log('OK  宿主兜底：最后一轮没有 payload 时也能显示')
 
 delete globalThis.fetch
 
+// 13) 兜底重试：前两次是空的（宿主还没生成完），第三次才有，最终必须显示
+globalThis.__dnsRetryMs = 5
+let tries = 0
+globalThis.fetch = async () => {
+  tries += 1
+  const ready = tries >= 3
+  return { ok: true, json: async () => ({ actions: ready ? [{ angle: 'standard', label: '重试后拿到', prompt: '重试后拿到' }] : [] }) }
+}
+reset()
+const propsRetry = { sessionId: 'retry-1', seq: 300, turn: { start: { seq: 290 }, end: { seq: 300 } }, useChat: (sel) => sel({ order: [], nodes: new Map() }) }
+render(propsRetry)
+await new Promise((r) => setTimeout(r, 60))
+const treeRetry = render(propsRetry)
+const buttonsRetry = buttonsOf(treeRetry)
+assert.equal(tries, 3, '前两次空 → 第三次拿到就停（实际调用 ' + tries + ' 次）')
+assert.equal(buttonsRetry.length, 1, '重试成功必须显示')
+assert.equal(buttonsRetry[0].children[0].children[0], '重试后拿到')
+console.log('OK  兜底重试：空的会重试，拿到就停')
+
+delete globalThis.fetch
+delete globalThis.__dnsRetryMs
+
 console.log('\naction checks passed')
