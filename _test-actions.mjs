@@ -65,13 +65,16 @@ globalThis.document = { head: { appendChild() {} }, createElement: () => ({ data
 const drafts = { value: '' }
 const submits = []
 let submitThrows = false
+let submitAsyncReject = false
 const shell = {
   state: { getSnapshot: () => ({ draft: drafts.value }) },
   actions: {
     setDraft: (text) => { drafts.value = text },
     submit: () => {
       if (submitThrows) throw new Error('composer rejected the submit')
+      if (submitAsyncReject) return Promise.reject(new Error('async composer rejected'))
       submits.push(drafts.value)
+      return undefined
     },
   },
   focus: () => {},
@@ -205,5 +208,22 @@ assert.equal(submits.length, 1, 'retry after failure must submit')
 const afterRetry = render(props5)
 assert.equal(buttonsOf(afterRetry)[0].props.disabled, true, 'retry success must lock the buttons')
 console.log('OK  失败后重试：可再次点击并成功提交')
+
+// 7) submit 返回被拒绝的 Promise：同样算失败，不能当成已发送
+const props7 = prepare('async-reject', '异步提交会失败')
+reset()
+drafts.value = ''
+submits.length = 0
+submitAsyncReject = true
+submitThrows = false
+const tree7 = render(props7)
+buttonsOf(tree7)[0].props.onClick({ shiftKey: false })
+flushTimers()
+await tick()
+const afterAsync = render(props7)
+assert.equal(buttonsOf(afterAsync)[0].props.disabled, false, 'an async submit rejection must not lock the buttons')
+console.log('OK  异步 submit 被拒绝：也算失败，按钮可用')
+submitAsyncReject = false
+
 
 console.log('\naction checks passed')

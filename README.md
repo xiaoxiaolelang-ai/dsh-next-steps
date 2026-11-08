@@ -82,7 +82,7 @@ dsh plugin add dsh-next-steps
 - `_test-next-steps.mjs`（13 项）：用假 React/假 ctx 驱动真实组件，覆盖逐轮投影、不继承上一轮、`latest`/`all` 两种模式、1/3 条跨列、缓存失效、跨会话隔离、兜底通道。
 - `_test-normalize.mjs`（5 项）：从 `index.js` 里抽出 `normalizeActions` 直接跑，覆盖推荐置顶、`stop` 沉底、去重、截断、非法输入过滤。
 - `_test-host.mjs`（5 项）：假 ctx 跑 Host 半边，验证工具注册、常驻提示的 section 顺序、`prompt: off` 时不注册。
-- `_test-actions.mjs`（6 项）：带状态的 hook shim，验证点击发送、**失败后可重试**、Shift+点击**追加**已有草稿、以及无障碍标记。
+- `_test-actions.mjs`（7 项）：带状态的 hook shim，验证点击发送、**失败后可重试**、Shift+点击**追加**已有草稿、以及无障碍标记。
 
 ## License
 

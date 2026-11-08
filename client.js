@@ -291,11 +291,17 @@ window.__ModuleLoader__.load({
             draft = undefined
           }
           if (draft === text || tries >= 12) {
+            const fail = (error) => resolve({ ok: false, error: error instanceof Error ? error.message : String(error) })
             try {
-              submit()
+              const pending = submit()
+              // submit 也可能返回 Promise：它的拒绝同样不能被当成"发送成功"。
+              if (pending !== undefined && pending !== null && typeof pending.then === 'function') {
+                pending.then(() => resolve({ ok: true }), fail)
+                return
+              }
               resolve({ ok: true })
             } catch (error) {
-              resolve({ ok: false, error: error instanceof Error ? error.message : String(error) })
+              fail(error)
             }
             return
           }
