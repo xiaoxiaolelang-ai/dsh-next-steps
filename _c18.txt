@@ -1,0 +1,13 @@
+feat: host-side fallback generation when the model skips (0.1.14)
+
+探针证明 agent/turn-stopping 可用：每轮触发，payload 有 turn / agent / signal，
+this 是 agent 作用域。实测模型最近 4 轮一次都没调用工具（工具本身在请求里可见）。
+
+这一版加宿主侧兜底：
+- 会话事件里查本轮有没有 tool/call: next_steps；有就跳过；
+- 没有就用这一轮 assistant 正文 + 会话自己的 provider/model（session.requestContext()）
+  调一次 llm.stream，要求返回 JSON 数组，再用同一份 normalizeActions 清洗；
+- 按「会话 + turn」存进内存（每会话最多 40 轮），不阻塞轮次关闭（不 await）；
+- 每一步结果都写 turn.log：skip-called / skip-empty / no-route / generated / failed。
+
+客户端还没接（下一步用 GET 路由投递）。

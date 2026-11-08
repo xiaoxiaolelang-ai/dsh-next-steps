@@ -29,6 +29,18 @@ function reportTurn(stage, detail) {
   }
 }
 
+/** 宿主侧兜底：模型没调用时，用它自己这一轮的正文生成建议。 */
+const FALLBACK_SYSTEM = [
+  'You generate the "next steps" buttons shown under an assistant reply.',
+  'Return ONLY a JSON array, no prose, no code fence. Each item: {"angle","label","prompt","recommended"}.',
+  'angle is one of: cautious, standard, bold, alternative, stop. At most one item has "recommended": true.',
+  'The first item is the next action of the current work. If that action happens outside the chat, phrase the item as the message the user sends afterwards.',
+  'Ground each item in the turn you are given: name the file, command, error or value involved.',
+  'One real item beats four padded ones. Never repeat finished work, never ask the user to confirm something already confirmed.',
+].join(' ')
+
+const generatedByTurn = new Map()
+
 const name = 'dsh-next-steps'
 const inject = ['tools']
 
@@ -143,10 +155,113 @@ function apply(ctx, config) {
     }
   }
 
+  /**
+   * 宿主侧兜底：模型这一轮没调用 next_steps 时，用这一轮的正文生成。
+   * 不阻塞轮次关闭（不 await），失败只记日志。
+   */
+  function maybeGenerate(ctxRef, configRef, payload) {
+    try {
+      const agent = payload === undefined || payload === null ? undefined : payload.agent
+      const session = agent === undefined || agent === null ? undefined : agent.session
+      if (session === undefined || session === null) return
+      const turn = payload.turn
+      if (!Number.isInteger(turn)) return
+      const llm = typeof ctxRef.get === 'function' ? ctxRef.get('llm') : undefined
+      if (llm === undefined || llm === null || typeof llm.stream !== 'function') {
+        reportTurn('fallback', 'no-llm')
+        return
+      }
+      // 这一轮有没有调用过工具？
+      let called = false
+      try {
+        for (const event of session.snapshotEvents()) {
+          if (event.type === 'turn/start') called = false
+          if (event.type === 'turn/end' && event.data?.turn === turn) break
+          if (event.type === 'tool/call' && event.data?.name === 'next_steps') called = true
+        }
+      } catch {}
+      if (called) {
+        reportTurn('fallback', 'skip-called ' + turn)
+        return
+      }
+      // 这一轮的正文
+      let text = ''
+      try {
+        for (const event of session.snapshotEvents()) {
+          if (event.type !== 'assistant/message') continue
+          if (event.data?.turn !== turn) continue
+          for (const block of event.data?.message?.content ?? []) {
+            if (block !== null && block !== undefined && block.type === 'text') text += String(block.text ?? '')
+          }
+        }
+      } catch {}
+      if (text.trim() === '') {
+        reportTurn('fallback', 'skip-empty ' + turn)
+        return
+      }
+      let route = null
+      try { route = session.requestContext() } catch {}
+      const provider = route?.provider ?? configRef?.provider
+      const model = route?.model ?? configRef?.model
+      if (typeof provider !== 'string' || provider === '' || typeof model !== 'string' || model === '') {
+        reportTurn('fallback', 'no-route ' + turn)
+        return
+      }
+      const started = Date.now()
+      void (async () => {
+        try {
+          let raw = ''
+          const stream = llm.stream({
+            provider,
+            model,
+            maxTokens: 600,
+            temperature: 0.3,
+            system: FALLBACK_SYSTEM,
+            messages: [{ role: 'user', content: [{ type: 'text', text: text.slice(-6000) }] }],
+            sessionId: session.id,
+          })
+          for await (const chunk of stream) {
+            if (chunk.type === 'text-delta') raw += chunk.text
+            if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
+              reportTurn('fallback', 'stream-error ' + turn + ' ' + chunk.reason.failure.message)
+              return
+            }
+          }
+          const start = raw.indexOf('[')
+          const end = raw.lastIndexOf(']')
+          if (start < 0 || end <= start) {
+            reportTurn('fallback', 'no-json ' + turn)
+            return
+          }
+          let parsed = null
+          try { parsed = JSON.parse(raw.slice(start, end + 1)) } catch { parsed = null }
+          const actions = normalizeActions(parsed, 4)
+          if (actions.length === 0) {
+            reportTurn('fallback', 'no-actions ' + turn)
+            return
+          }
+          const perSession = generatedByTurn.get(session.id) ?? new Map()
+          perSession.set(turn, actions)
+          if (perSession.size > 40) {
+            const oldest = perSession.keys().next()
+            if (oldest.done !== true) perSession.delete(oldest.value)
+          }
+          generatedByTurn.set(session.id, perSession)
+          reportTurn('fallback', 'generated turn=' + turn + ' n=' + actions.length + ' ms=' + (Date.now() - started))
+        } catch (error) {
+          reportTurn('fallback', 'failed ' + turn + ' ' + (error instanceof Error ? error.message : String(error)))
+        }
+      })()
+    } catch (error) {
+      reportTurn('fallback', 'outer-failed ' + (error instanceof Error ? error.message : String(error)))
+    }
+  }
+
   try {
     ctx.on('agent/turn-stopping', function onTurnStopping(payload) {
       try {
         const agent = payload === undefined || payload === null ? undefined : payload.agent
+        if (config?.fallback !== 'off') maybeGenerate(ctx, config, payload)
         reportTurn('turn-stopping', JSON.stringify({
           keys: payload === undefined || payload === null ? [] : Object.keys(payload),
           turn: payload === undefined || payload === null ? null : payload.turn,
@@ -186,7 +301,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.13', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.14', mode: history, actions }),
           },
         ]
       },
