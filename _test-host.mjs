@@ -31,9 +31,14 @@ console.log('OK  工具注册形状：parameters/output.render/execute 齐全')
 // 2) 常驻指令：order 与文案
 assert.ok(state.section, 'section registered')
 assert.equal(state.section.name, 'next-steps')
-assert.equal(state.section.order, 9500)
+assert.equal(state.section.order, 9899)
 assert.ok(state.section.text.includes('suggest_actions'))
-console.log('OK  常驻指令：order=9500，文案点名 suggest_actions')
+assert.ok(state.section.text.includes('Every reply gets a call'), '指令必须要求每轮调用')
+assert.ok(state.section.text.includes('Quality bar'), '指令必须带质量标准')
+assert.ok(state.section.text.includes('Never pad'), '指令必须禁止凑数')
+assert.ok(state.section.text.includes('Never: generic filler'), '指令必须点明禁止的填充词')
+assert.ok(!state.section.text.includes('Skip it only when'), '不能保留那条容易被当借口的例外')
+console.log('OK  常驻指令：order=9899，要求每轮调用、带质量标准、禁止凑数')
 
 // 3) 渲染交回给客户端的第二段必须带 MARKER，且是算好的顺序
 const rendered = state.tool.output.render({ actions: [

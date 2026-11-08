@@ -29,10 +29,12 @@ const description = [
 
 /** 常驻提示：让模型每轮都调用一次工具，而不是靠它自己记得。 */
 const PROMPT_TEXT = [
-  "End the reply with the `suggest_actions` tool: 2-4 clickable next steps the user might take,",
-  "at most one entry per stance, exactly one marked `recommended`. Phrase each as the action it performs.",
-  "Skip it only when the reply is a bare acknowledgement or the user asked a pure factual question",
-  "with no sensible next move.",
+  "End the reply with the `suggest_actions` tool. Every reply gets a call, except a bare acknowledgement with nothing left to do.",
+  "Quality bar: each step must follow from the work of this turn — name the file, command, error or value you just touched, so it can be acted on without re-reading the conversation.",
+  "Size: two to four steps is normal; if only one step is genuinely worth taking, return one. Never pad.",
+  "Stances: at most one entry per stance, exactly one marked `recommended`.",
+  "Fields: `label` is the action written in the conversation language as a complete instruction; `prompt` is the exact message the user would send, self-contained with paths and the detail a fresh turn needs; omit `prompt` only when `label` is already that message.",
+  "Never: generic filler (continue, optimize further, check the docs), repeating work you just finished, or hedging (if you want, you could).",
 ].join(" ")
 
 const parameters = {
@@ -104,11 +106,11 @@ function apply(ctx, config) {
   if (promptMode === "always") {
     const systemPrompt = ctx.get("systemPrompt")
     if (systemPrompt !== undefined && systemPrompt !== null && typeof systemPrompt.section === "function") {
-      // 9500：排在工具说明之后、交付物与结构化输出之前，属于"收尾要求"这一档。
+      // 9899：几乎排到系统提示的最后——这条要求越靠近末尾，模型越不容易在中途"忘了收尾"。
       // 包一层：万一别的插件占了同名 section 或宿主 API 变了，也不能连累工具注册。
       try {
         ctx.effect(
-          () => systemPrompt.section({ name: "next-steps", order: 9500, text: PROMPT_TEXT }),
+          () => systemPrompt.section({ name: "next-steps", order: 9899, text: PROMPT_TEXT }),
           "dsh-next-steps: prompt section",
         )
       } catch {}
@@ -140,7 +142,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.2', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.3', mode: history, actions }),
           },
         ]
       },
