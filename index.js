@@ -9,6 +9,26 @@
  * Schema 直接注册，零依赖；排序/去重/截断也在这里算一次，客户端照抄。
  */
 
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+
+/**
+ * 注册诊断：工具/提示段/路由三处各自成功还是失败，写进
+ * DSH_HOME/dsh-next-steps/load.log。插件加载失败时界面没有提示，
+ * 这个文件是唯一能自证的地方。
+ */
+function reportLoad(stage, detail) {
+  try {
+    const home = process.env.DSH_HOME === undefined || process.env.DSH_HOME === '' ? join(homedir(), '.dsh') : process.env.DSH_HOME
+    const file = join(home, 'dsh-next-steps', 'load.log')
+    mkdirSync(dirname(file), { recursive: true })
+    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), stage, detail }) + '\n')
+  } catch {
+    // 诊断不能反过来影响加载
+  }
+}
+
 const name = 'dsh-next-steps'
 const inject = ['tools']
 
@@ -116,11 +136,15 @@ function apply(ctx, config) {
           () => systemPrompt.section({ name: "next-steps", order: 9899, text: PROMPT_TEXT }),
           "dsh-next-steps: prompt section",
         )
-      } catch {}
+        reportLoad('section', 'registered')
+      } catch (error) {
+        reportLoad('section', 'failed: ' + (error instanceof Error ? error.message : String(error)))
+      }
 
     }
   }
 
+  try {
   ctx.tools.register({
     name: 'next_steps',
     description,
@@ -145,7 +169,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.6', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.7', mode: history, actions }),
           },
         ]
       },
@@ -156,6 +180,10 @@ function apply(ctx, config) {
       return { shown: actions.length > 0 }
     },
   })
+  reportLoad('tool', 'registered')
+  } catch (error) {
+    reportLoad('tool', 'failed: ' + (error instanceof Error ? error.message : String(error)))
+  }
 }
 
 /**
