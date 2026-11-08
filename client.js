@@ -248,6 +248,27 @@ window.__ModuleLoader__.load({
      * 提交与填入
      * ------------------------------------------------------------------ */
 
+    /**
+     * 宿主兜底：模型没调用时，宿主在轮次结束前自己生成（见 host 的 turn-stopping）。
+     * 这里只在"最后一轮且没有 payload"时取一次；取不到就当没有。
+     */
+    const FALLBACK_URL = '/api/dsh-next-steps/actions'
+    const fallbackCache = new Map()
+
+    async function fetchFallbackActions(sessionId) {
+      try {
+        const response = await fetch(FALLBACK_URL + '?session=' + encodeURIComponent(sessionId), {
+          headers: { accept: 'application/json' },
+        })
+        if (response === undefined || response === null || response.ok !== true) return null
+        const data = await response.json()
+        const actions = data === null || data === undefined ? undefined : data.actions
+        return Array.isArray(actions) && actions.length > 0 ? actions : null
+      } catch {
+        return null
+      }
+    }
+
     function composerShell(ctx, sessionId) {
       try {
         const conversation = ctx.get('conversation')
@@ -455,10 +476,42 @@ window.__ModuleLoader__.load({
           if (payload !== null) rememberTail(sessionId, endSeq, payload)
         }, [payload, sessionId, endSeq])
 
-        if (resolved === null || resolved.actions.length === 0) return null
-        if (resolved.mode === 'latest' && latestEnd !== undefined && endSeq !== latestEnd) return null
+        /* 节点通路没有数据、且这是最后一轮时，问一次宿主兜底。 */
+        const [remote, setRemote] = React.useState(null)
+        const needFallback = resolved === null && endSeq !== undefined && endSeq === latestEnd && sessionId !== ''
+        React.useEffect(() => {
+          if (!needFallback) return undefined
+          const cacheKey = sessionId + ':' + endSeq
+          const cached = fallbackCache.get(cacheKey)
+          if (cached !== undefined) {
+            setRemote({ endSeq, actions: cached })
+            return undefined
+          }
+          let alive = true
+          fetchFallbackActions(sessionId).then((actions) => {
+            if (!alive || actions === null) return
+            if (fallbackCache.size > 40) {
+              const oldest = fallbackCache.keys().next()
+              if (oldest.done !== true) fallbackCache.delete(oldest.value)
+            }
+            fallbackCache.set(cacheKey, actions)
+            setRemote({ endSeq, actions })
+          })
+          return () => {
+            alive = false
+          }
+        }, [needFallback, sessionId, endSeq])
 
-        const items = resolved.actions
+        const effective = resolved !== null && resolved.actions.length > 0
+          ? resolved
+          : remote !== null && remote.endSeq === endSeq
+            ? { mode: 'latest', actions: remote.actions }
+            : null
+
+        if (effective === null || effective.actions.length === 0) return null
+        if (effective.mode === 'latest' && latestEnd !== undefined && endSeq !== latestEnd) return null
+
+        const items = effective.actions
         const children = items.map((item, position) => {
           const tier = item.recommended === true ? VISIBLE_TIERS.rec : item.angle === 'stop' ? VISIBLE_TIERS.weak : VISIBLE_TIERS.normal
           const span = items.length === 1 || (items.length === 3 && position === 2)

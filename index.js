@@ -136,6 +136,8 @@ function apply(ctx, config) {
   const maxActions = Number.isInteger(rawMax) && rawMax > 0 ? rawMax : MAX_ACTIONS
   const history = config?.history === 'all' ? 'all' : 'latest'
 
+  if (typeof installRoute === 'function') installRoute(ctx)
+
   const promptMode = config?.prompt === "off" ? "off" : "always"
   if (promptMode === "always") {
     const systemPrompt = ctx.get("systemPrompt")
@@ -199,7 +201,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.15', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.16', mode: history, actions }),
           },
         ]
       },
@@ -312,6 +314,62 @@ function maybeGenerate(ctxRef, configRef, payload) {
   }
 }
 
+const ACTIONS_PATH = '/api/dsh-next-steps/actions'
+
+/** 某个会话最近一轮的兜底结果（客户端只知道“最后一轮”，不知道轮次号）。 */
+function latestFallback(sessionId) {
+  const perSession = generatedByTurn.get(sessionId)
+  if (perSession === undefined || perSession.size === 0) return null
+  let bestTurn = -1
+  let best = null
+  for (const [turn, actions] of perSession) {
+    if (turn > bestTurn && Array.isArray(actions) && actions.length > 0) {
+      bestTurn = turn
+      best = actions
+    }
+  }
+  return best
+}
+
+function jsonResponse(value) {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  })
+}
+
+let routeInstalled = false
+
+/** 注册 GET 路由；宿主没有 connection 服务就返回 false。失败不影响工具。 */
+function installRoute(ctx) {
+  if (routeInstalled) return false
+  const connection = ctx.connection ?? (typeof ctx.get === 'function' ? ctx.get('connection') : undefined)
+  const fetchService = connection === undefined || connection === null ? undefined : connection.fetch
+  if (fetchService === undefined || fetchService === null || typeof fetchService.register !== 'function') return false
+  routeInstalled = true
+  try {
+    ctx.effect(() => fetchService.register({
+      path: ACTIONS_PATH,
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          const url = new URL(String(request?.url ?? ACTIONS_PATH), 'http://dsh.local')
+          const sessionId = url.searchParams.get('session') ?? ''
+          const actions = latestFallback(sessionId)
+          return jsonResponse({ actions: actions === null ? [] : actions })
+        } catch {
+          return jsonResponse({ actions: [] })
+        }
+      },
+    }), 'dsh-next-steps: actions route')
+    return true
+  } catch (error) {
+    reportTurn('route', 'failed: ' + (error instanceof Error ? error.message : String(error)))
+    return false
+  }
+}
+
 /** 供路由与测试读取：某个会话某一轮的兜底结果。 */
 function fallbackActionsFor(sessionId, turn) {
   const perSession = generatedByTurn.get(sessionId)
@@ -320,4 +378,4 @@ function fallbackActionsFor(sessionId, turn) {
   return Array.isArray(actions) && actions.length > 0 ? actions : null
 }
 
-export { apply, fallbackActionsFor, inject, maybeGenerate, name, normalizeActions }
+export { apply, fallbackActionsFor, inject, installRoute, latestFallback, maybeGenerate, name, normalizeActions }

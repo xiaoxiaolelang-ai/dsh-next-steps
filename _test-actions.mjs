@@ -226,4 +226,24 @@ console.log('OK  异步 submit 被拒绝：也算失败，按钮可用')
 submitAsyncReject = false
 
 
+// 12) 宿主兜底通路：节点里没有 payload，GET 路由给了建议
+let fbCalls = 0
+globalThis.fetch = async (url) => {
+  fbCalls += 1
+  assert.ok(String(url).includes('/api/dsh-next-steps/actions?session='), '必须带上 session')
+  return { ok: true, json: async () => ({ actions: [{ angle: 'standard', label: '来自兜底', prompt: '来自兜底' }] }) }
+}
+reset()
+const propsFb = { sessionId: 'fb-1', seq: 200, turn: { start: { seq: 190 }, end: { seq: 200 } }, useChat: (sel) => sel({ order: [], nodes: new Map() }) }
+render(propsFb)
+await tick()
+const treeFb = render(propsFb)
+const buttonsFb = buttonsOf(treeFb)
+assert.equal(fbCalls, 1, '只应拉一次')
+assert.equal(buttonsFb.length, 1, '兜底有数据就要显示')
+assert.equal(buttonsFb[0].children[0].children[0], '来自兜底')
+console.log('OK  宿主兜底：最后一轮没有 payload 时也能显示')
+
+delete globalThis.fetch
+
 console.log('\naction checks passed')
