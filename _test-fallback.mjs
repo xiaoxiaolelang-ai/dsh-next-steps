@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
+// 测试写日志要隔离，别污染真实的 turn.log
+process.env.DSH_HOME = join(here, '_test-home')
 const mod = await import('file://' + join(here, 'index.js').replace(/\\/g, '/'))
 
 function makeSession(events) {
