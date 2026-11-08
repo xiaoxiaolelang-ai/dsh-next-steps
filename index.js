@@ -9,38 +9,6 @@
  * Schema 直接注册，零依赖；排序/去重/截断也在这里算一次，客户端照抄。
  */
 
-import { appendFileSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-
-/**
- * 探针日志：只写 DSH_HOME/dsh-next-steps/turn.log。
- * 目的是确认 agent/turn-stopping 真的会在轮次关闭前触发、能拿到 agent 与 turn，
- * 以及本轮有没有调用过 next_steps。
- */
-function reportTurn(stage, detail) {
-  try {
-    const home = process.env.DSH_HOME === undefined || process.env.DSH_HOME === '' ? join(homedir(), '.dsh') : process.env.DSH_HOME
-    const file = join(home, 'dsh-next-steps', 'turn.log')
-    mkdirSync(dirname(file), { recursive: true })
-    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), stage, detail }) + '\n')
-  } catch {
-    // 探针不能影响插件
-  }
-}
-
-/** 宿主侧兜底：模型没调用时，用它自己这一轮的正文生成建议。 */
-const FALLBACK_SYSTEM = [
-  'You generate the "next steps" buttons shown under an assistant reply.',
-  'Return ONLY a JSON array, no prose, no code fence. Each item: {"angle","label","prompt","recommended"}.',
-  'angle is one of: cautious, standard, bold, alternative, stop. At most one item has "recommended": true.',
-  'The first item is the next action of the current work. If that action happens outside the chat, phrase the item as the message the user sends afterwards.',
-  'Ground each item in the turn you are given: name the file, command, error or value involved.',
-  'One real item beats four padded ones. Never repeat finished work, never ask the user to confirm something already confirmed.',
-].join(' ')
-
-const generatedByTurn = new Map()
-
 const name = 'dsh-next-steps'
 const inject = ['tools']
 
@@ -136,8 +104,6 @@ function apply(ctx, config) {
   const maxActions = Number.isInteger(rawMax) && rawMax > 0 ? rawMax : MAX_ACTIONS
   const history = config?.history === 'all' ? 'all' : 'latest'
 
-  if (typeof installRoute === 'function') installRoute(ctx)
-
   const promptMode = config?.prompt === "off" ? "off" : "always"
   if (promptMode === "always") {
     const systemPrompt = ctx.get("systemPrompt")
@@ -155,68 +121,6 @@ function apply(ctx, config) {
       } catch {}
 
     }
-  }
-
-  function pickEmitter(candidate) {
-    if (candidate === undefined || candidate === null) return null
-    if (typeof candidate.on === 'function') return candidate
-    if (candidate.root !== undefined && candidate.root !== null && typeof candidate.root.on === 'function') return candidate.root
-    if (candidate.scope !== undefined && candidate.scope !== null && typeof candidate.scope.on === 'function') return candidate.scope
-    return null
-  }
-
-  reportTurn('ctx-shape', JSON.stringify({
-    on: typeof ctx.on,
-    effect: typeof ctx.effect,
-    tools: typeof (ctx.tools ?? null),
-    get: typeof ctx.get,
-    hasRoot: ctx.root !== undefined && ctx.root !== null,
-    rootOn: ctx.root === undefined || ctx.root === null ? 'n/a' : typeof ctx.root.on,
-  }))
-
-  const emitter = pickEmitter(ctx)
-  try {
-    if (emitter === null) throw new Error('no emitter on ctx/root/scope')
-    emitter.on('agent/turn-stopping', function onTurnStopping(payload) {
-      try {
-        const agent = payload === undefined || payload === null ? undefined : payload.agent
-        if (config?.fallback !== 'off') maybeGenerate(ctx, config, payload)
-        reportTurn('turn-stopping', JSON.stringify({
-          keys: payload === undefined || payload === null ? [] : Object.keys(payload),
-          turn: payload === undefined || payload === null ? null : payload.turn,
-          sessionId: agent === undefined || agent === null ? null : agent.id ?? agent.session?.id ?? null,
-          scopedThis: this !== undefined && this !== null,
-        }))
-      } catch (error) {
-        reportTurn('turn-stopping-error', error instanceof Error ? error.message : String(error))
-      }
-    })
-    reportTurn('listener', 'registered')
-  } catch (error) {
-    reportTurn('listener', 'failed: ' + (error instanceof Error ? error.message : String(error)))
-    // 再试几次：有些上下文要晚一点才具备事件能力
-    let tries = 0
-    const timer = setInterval(() => {
-      tries += 1
-      const late = pickEmitter(ctx)
-      if (late !== null) {
-        clearInterval(timer)
-        try {
-          late.on('agent/turn-stopping', function onTurnStopping(payload) {
-            try {
-              if (config?.fallback !== 'off') maybeGenerate(ctx, config, payload)
-              reportTurn('turn-stopping-late', 'ok')
-            } catch {}
-          })
-          reportTurn('listener', 'registered-late attempt=' + tries)
-        } catch (error2) {
-          reportTurn('listener', 'late-failed: ' + (error2 instanceof Error ? error2.message : String(error2)))
-        }
-        return
-      }
-      if (tries >= 20) clearInterval(timer)
-    }, 1500)
-    if (typeof timer.unref === 'function') timer.unref()
   }
 
   ctx.tools.register({
@@ -243,7 +147,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.18', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.12', mode: history, actions }),
           },
         ]
       },
@@ -254,172 +158,4 @@ function apply(ctx, config) {
   })
 }
 
-/**
- * 宿主侧兜底：模型这一轮没调用 next_steps 时，用这一轮的正文生成。
- * 不阻塞轮次关闭（不 await），失败只记日志。
- */
-function maybeGenerate(ctxRef, configRef, payload) {
-  try {
-    const agent = payload === undefined || payload === null ? undefined : payload.agent
-    const session = agent === undefined || agent === null ? undefined : agent.session
-    if (session === undefined || session === null) return
-    const turn = payload.turn
-    if (!Number.isInteger(turn)) return
-    const llm = typeof ctxRef.get === 'function' ? ctxRef.get('llm') : undefined
-    if (llm === undefined || llm === null || typeof llm.stream !== 'function') {
-      reportTurn('fallback', 'no-llm')
-      return
-    }
-    // 这一轮有没有调用过工具？
-    let called = false
-    try {
-      for (const event of session.snapshotEvents()) {
-        if (event.type === 'turn/start') called = false
-        if (event.type === 'turn/end' && event.data?.turn === turn) break
-        if (event.type === 'tool/call' && event.data?.name === 'next_steps') called = true
-      }
-    } catch {}
-    if (called) {
-      reportTurn('fallback', 'skip-called ' + turn)
-      return
-    }
-    // 这一轮的正文
-    let text = ''
-    try {
-      for (const event of session.snapshotEvents()) {
-        if (event.type !== 'assistant/message') continue
-        if (event.data?.turn !== turn) continue
-        for (const block of event.data?.message?.content ?? []) {
-          if (block !== null && block !== undefined && block.type === 'text') text += String(block.text ?? '')
-        }
-      }
-    } catch {}
-    if (text.trim() === '') {
-      reportTurn('fallback', 'skip-empty ' + turn)
-      return
-    }
-    let route = null
-    try { route = session.requestContext() } catch {}
-    const provider = route?.provider ?? configRef?.provider
-    const model = route?.model ?? configRef?.model
-    if (typeof provider !== 'string' || provider === '' || typeof model !== 'string' || model === '') {
-      reportTurn('fallback', 'no-route ' + turn)
-      return
-    }
-    const started = Date.now()
-    void (async () => {
-      try {
-        let raw = ''
-        const stream = llm.stream({
-          provider,
-          model,
-          maxTokens: 600,
-          temperature: 0.3,
-          system: FALLBACK_SYSTEM,
-          messages: [{ role: 'user', content: [{ type: 'text', text: text.slice(-6000) }] }],
-          sessionId: session.id,
-        })
-        for await (const chunk of stream) {
-          if (chunk.type === 'text-delta') raw += chunk.text
-          if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
-            reportTurn('fallback', 'stream-error ' + turn + ' ' + chunk.reason.failure.message)
-            return
-          }
-        }
-        const start = raw.indexOf('[')
-        const end = raw.lastIndexOf(']')
-        if (start < 0 || end <= start) {
-          reportTurn('fallback', 'no-json ' + turn)
-          return
-        }
-        let parsed = null
-        try { parsed = JSON.parse(raw.slice(start, end + 1)) } catch { parsed = null }
-        const actions = normalizeActions(parsed, 4)
-        if (actions.length === 0) {
-          reportTurn('fallback', 'no-actions ' + turn)
-          return
-        }
-        const perSession = generatedByTurn.get(session.id) ?? new Map()
-        perSession.set(turn, actions)
-        if (perSession.size > 40) {
-          const oldest = perSession.keys().next()
-          if (oldest.done !== true) perSession.delete(oldest.value)
-        }
-        generatedByTurn.set(session.id, perSession)
-        reportTurn('fallback', 'generated turn=' + turn + ' n=' + actions.length + ' ms=' + (Date.now() - started))
-      } catch (error) {
-        reportTurn('fallback', 'failed ' + turn + ' ' + (error instanceof Error ? error.message : String(error)))
-      }
-    })()
-  } catch (error) {
-    reportTurn('fallback', 'outer-failed ' + (error instanceof Error ? error.message : String(error)))
-  }
-}
-
-const ACTIONS_PATH = '/api/dsh-next-steps/actions'
-
-/** 某个会话最近一轮的兜底结果（客户端只知道“最后一轮”，不知道轮次号）。 */
-function latestFallback(sessionId) {
-  const perSession = generatedByTurn.get(sessionId)
-  if (perSession === undefined || perSession.size === 0) return null
-  let bestTurn = -1
-  let best = null
-  for (const [turn, actions] of perSession) {
-    if (turn > bestTurn && Array.isArray(actions) && actions.length > 0) {
-      bestTurn = turn
-      best = actions
-    }
-  }
-  return best
-}
-
-function jsonResponse(value) {
-  return new Response(JSON.stringify(value), {
-    status: 200,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  })
-}
-
-let routeInstalled = false
-
-/** 注册 GET 路由；宿主没有 connection 服务就返回 false。失败不影响工具。 */
-function installRoute(ctx) {
-  if (routeInstalled) return false
-  const connection = ctx.connection ?? (typeof ctx.get === 'function' ? ctx.get('connection') : undefined)
-  const fetchService = connection === undefined || connection === null ? undefined : connection.fetch
-  if (fetchService === undefined || fetchService === null || typeof fetchService.register !== 'function') return false
-  routeInstalled = true
-  try {
-    ctx.effect(() => fetchService.register({
-      path: ACTIONS_PATH,
-      methods: ['GET'],
-      requestBody: 'buffered',
-      fetch: async (request) => {
-        try {
-          const url = new URL(String(request?.url ?? ACTIONS_PATH), 'http://dsh.local')
-          const sessionId = url.searchParams.get('session') ?? ''
-          const actions = latestFallback(sessionId)
-          reportTurn('route-hit', 'session=' + sessionId.slice(0, 24) + ' n=' + (actions === null ? 0 : actions.length))
-          return jsonResponse({ actions: actions === null ? [] : actions })
-        } catch {
-          return jsonResponse({ actions: [] })
-        }
-      },
-    }), 'dsh-next-steps: actions route')
-    reportTurn('route', 'registered')
-    return true
-  } catch (error) {
-    reportTurn('route', 'failed: ' + (error instanceof Error ? error.message : String(error)))
-    return false
-  }
-}
-
-/** 供路由与测试读取：某个会话某一轮的兜底结果。 */
-function fallbackActionsFor(sessionId, turn) {
-  const perSession = generatedByTurn.get(sessionId)
-  if (perSession === undefined) return null
-  const actions = perSession.get(turn)
-  return Array.isArray(actions) && actions.length > 0 ? actions : null
-}
-
-export { apply, fallbackActionsFor, inject, installRoute, latestFallback, maybeGenerate, name, normalizeActions }
+export { apply, inject, name, normalizeActions }

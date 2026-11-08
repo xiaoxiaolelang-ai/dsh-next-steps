@@ -1,8 +1,0 @@
-{"at":"2026-11-08T16:18:38.391Z","stage":"fallback","detail":"skip-called 1"}
-{"at":"2026-11-08T16:18:38.430Z","stage":"fallback","detail":"generated turn=2 n=1 ms=1"}
-{"at":"2026-11-08T16:18:38.461Z","stage":"fallback","detail":"no-json 3"}
-{"at":"2026-11-08T16:18:38.491Z","stage":"fallback","detail":"no-llm"}
-{"at":"2026-11-08T16:19:54.693Z","stage":"fallback","detail":"skip-called 1"}
-{"at":"2026-11-08T16:19:54.728Z","stage":"fallback","detail":"generated turn=2 n=1 ms=0"}
-{"at":"2026-11-08T16:19:54.759Z","stage":"fallback","detail":"no-json 3"}
-{"at":"2026-11-08T16:19:54.790Z","stage":"fallback","detail":"no-llm"}
