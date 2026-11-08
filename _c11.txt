@@ -1,0 +1,12 @@
+diag: register the route once, log async route outcomes and each apply's context shape
+
+现场：load.log 显示 section 注册 1 次、tool 注册 4 次（都 success），但 Agent 能调用的
+153 个工具里没有 next_steps——注册成功却不在调用集合里。
+
+- 路由改为只注册一次并记录异步成败（重复注册同一 path 可能异步拒绝，
+  而 effect 失败会把同一 fiber 的工具注册一起带走）；
+- 每次 apply 额外记录上下文形状（有没有 systemPrompt / connection / tools），
+  下一次重启就能看出工具究竟注册进了哪种作用域；
+- 版本 0.1.8。
+
+自检 40 项：13 / 5 / 5 / 9 / 8。

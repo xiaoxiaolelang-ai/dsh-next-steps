@@ -169,7 +169,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.7', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.8', mode: history, actions }),
           },
         ]
       },
@@ -180,7 +180,11 @@ function apply(ctx, config) {
       return { shown: actions.length > 0 }
     },
   })
-  reportLoad('tool', 'registered')
+  reportLoad('tool', 'registered ' + JSON.stringify({
+      hasPrompt: typeof ctx.get === 'function' && ctx.get('systemPrompt') !== undefined,
+      hasConnection: typeof ctx.get === 'function' && ctx.get('connection') !== undefined,
+      hasTools: typeof ctx.get === 'function' && ctx.get('tools') !== undefined,
+    }))
   } catch (error) {
     reportLoad('tool', 'failed: ' + (error instanceof Error ? error.message : String(error)))
   }
@@ -235,12 +239,17 @@ function jsonResponse(value) {
 }
 
 /** 注册 GET 路由；宿主没有 connection 服务就返回 false。 */
+let routeInstalled = false
+
 function installRoute(ctx) {
+  if (routeInstalled) return false
   const connection = ctx.connection ?? (typeof ctx.get === 'function' ? ctx.get('connection') : undefined)
   const fetchService = connection === undefined || connection === null ? undefined : connection.fetch
   if (fetchService === undefined || fetchService === null || typeof fetchService.register !== 'function') return false
+  routeInstalled = true
   try {
-    ctx.effect(() => fetchService.register({
+    ctx.effect(() => {
+      const registered = fetchService.register({
       path: ACTIONS_PATH,
       methods: ['GET'],
       requestBody: 'buffered',
@@ -253,9 +262,29 @@ function installRoute(ctx) {
           return jsonResponse({ entries: [] })
         }
       },
-    }), 'dsh-next-steps: actions route')
+      })
+      /* register 可能返回 promise；它的拒绝同样要留痕，否则只会表现为"工具莫名消失"。 */
+      if (registered !== undefined && registered !== null && typeof registered.then === 'function') {
+        registered.then(
+          () => reportLoad('route', 'registered'),
+          (error) => reportLoad('route', 'failed: ' + (error instanceof Error ? error.message : String(error))),
+        )
+        return () => {
+          try {
+            if (typeof registered.dispose === 'function') registered.dispose()
+          } catch {}
+        }
+      }
+      reportLoad('route', 'registered')
+      return () => {
+        try {
+          if (typeof registered === 'function') registered()
+        } catch {}
+      }
+    }, 'dsh-next-steps: actions route')
     return true
-  } catch {
+  } catch (error) {
+    reportLoad('route', 'failed-sync: ' + (error instanceof Error ? error.message : String(error)))
     return false
   }
 }
