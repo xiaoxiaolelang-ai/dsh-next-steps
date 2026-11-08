@@ -1,6 +1,6 @@
 {
   "name": "dsh-next-steps",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "type": "module",
   "description": "Per-turn next-step suggestions under each reply: a 2x2 grid of up to four clickable actions, each turn projected from its own tool result.",
   "keywords": [
