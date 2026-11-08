@@ -1,0 +1,10 @@
+refactor: rename the tool to next_steps (0.1.6)
+
+插件是包名（dsh-next-steps），工具是模型看到的名字。原来叫 suggest_actions
+（继承自前身 dsh-suggest-actions），和插件名对不上，用户也会困惑。
+
+- 工具注册、常驻提示、客户端采集（toolview 的 data-tool 与 key）全部改成 next_steps；
+- 旧会话里由 suggest_actions 产生的历史按钮不再渲染——客户端只认新名字；
+- 版本 0.1.6，rev 同步。
+
+自检 38 项：13 / 5 / 5 / 8 / 7。

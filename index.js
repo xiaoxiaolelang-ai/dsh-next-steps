@@ -1,7 +1,7 @@
 /**
  * 下一步建议（dsh-next-steps）—— Host 半边。
  *
- * 只做一件事：注册 `suggest_actions` 工具。模型调它，参数里带 2-4 条建议，
+ * 只做一件事：注册 `next_steps` 工具。模型调它，参数里带 2-4 条建议，
  * 工具立刻返回，这一轮正常结束——不等人、不打断。
  *
  * 为什么不 import 宿主的包：本插件以**本地目录**安装，模块解析从插件目录
@@ -29,7 +29,7 @@ const description = [
 
 /** 常驻提示：让模型每轮都调用一次工具，而不是靠它自己记得。 */
 const PROMPT_TEXT = [
-  "End the reply with the `suggest_actions` tool. Every reply gets a call, except a bare acknowledgement.",
+  "End the reply with the `next_steps` tool. Every reply gets a call, except a bare acknowledgement.",
   "A turn that only ran tools still counts: the reply is what you write after them, so it ends with a call too.",
   "The first item is the next action and carries `recommended`: what the user would do next if they only said continue. Never restate finished work.",
   "If that action happens outside the chat, write the item as the message the user sends afterwards, not as an instruction.",
@@ -122,7 +122,7 @@ function apply(ctx, config) {
   }
 
   ctx.tools.register({
-    name: 'suggest_actions',
+    name: 'next_steps',
     description,
     parameters,
     output: {
@@ -145,7 +145,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.5', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.6', mode: history, actions }),
           },
         ]
       },
