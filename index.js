@@ -30,6 +30,7 @@ const description = [
 /** 常驻提示：让模型每轮都调用一次工具，而不是靠它自己记得。 */
 const PROMPT_TEXT = [
   "End the reply with the `suggest_actions` tool. Every reply gets a call, except a bare acknowledgement.",
+  "A turn that only ran tools still counts: the reply is what you write after them, so it ends with a call too.",
   "The first item is the next action and carries `recommended`: what the user would do next if they only said continue. Never restate finished work.",
   "If that action happens outside the chat, write the item as the message the user sends afterwards, not as an instruction.",
   "Ground each item in this turn: name the file, command, error or value involved. One real item beats four padded ones.",

@@ -1,0 +1,9 @@
+feat: require the call on tool-only turns too (still 0.1.4, unreleased)
+
+实测：诗情词意那个会话（run_code 密集：16 / 10 / 1 次工具调用）三轮都给出了
+1600-4100 字的正文，但一次都没调用 suggest_actions；而它的系统提示里确实
+带了这条 section（129 KB，含 suggest_actions）。所以不是插件没加载，
+是模型把"这一轮只跑了工具"当成了不需要收尾的情形。
+
+补一句通用规则：只跑了工具的轮次也算，回复正文写完之后同样要调用。
+提示词从 116 词到 139 词，仍远低于 200 词上限，且没有引入任何场景词。
