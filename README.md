@@ -73,6 +73,15 @@ dsh plugin add dsh-next-steps
 
 代价：清掉站点数据（localStorage）后，历史轮次的建议就真的没了——但只影响历史，不影响新的一轮。
 
+## PTC 会话的兜底通路
+
+PTC（`run_code`）会话里工具在程序内部调用，结果只进 `tool/ptc-dispatch`，**不会**变成顶层工具结果行。实测那个会话的 30 个 `run_code` 结果里，**0 个**含 payload——所以客户端不可能从节点里读出来。
+
+0.1.5 起改用一条最普通的通道：工具的 `execute` 把本轮 actions 记下来（按会话隔离、每个会话保留最近 20 条），客户端用 `GET /api/dsh-next-steps/actions?session=<id>` 取回。
+
+- **失败影响面极小**：路由坏了只是“没有按钮”，不碰会话历史、投影、渲染。
+- **只在最后一轮问一次**，且每个会话有缓存，不发轮询。
+- 局限：PTC 会话目前只覆盖**最后一轮**的推荐（拿不到更早轮次的 seq 归属）。
 ## 已知限制
 
 - 工具结果里那段给客户端读的 JSON（前缀 `dsh-next-steps/v1`）也会进入模型上下文，每次约几百 token。改用 host 的 session projection + `wire.view` 可以消掉，但目前没做。

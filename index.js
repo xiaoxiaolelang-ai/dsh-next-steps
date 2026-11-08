@@ -103,6 +103,8 @@ function apply(ctx, config) {
   const maxActions = Number.isInteger(rawMax) && rawMax > 0 ? rawMax : MAX_ACTIONS
   const history = config?.history === 'all' ? 'all' : 'latest'
 
+  if (typeof installRoute === 'function') installRoute(ctx)
+
   const promptMode = config?.prompt === "off" ? "off" : "always"
   if (promptMode === "always") {
     const systemPrompt = ctx.get("systemPrompt")
@@ -143,15 +145,83 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.4', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.5', mode: history, actions }),
           },
         ]
       },
     },
-    async execute(args) {
-      return { shown: normalizeActions(args?.actions, maxActions).length > 0 }
+    async execute(args, exec) {
+      const actions = normalizeActions(args?.actions, maxActions)
+      recordActions(sessionIdOf(exec), actions, history)
+      return { shown: actions.length > 0 }
     },
   })
 }
 
-export { apply, inject, name, normalizeActions }
+/**
+ * PTC 会话（run_code）里工具是在程序内部被调用的：结果只进 `tool/ptc-dispatch`，
+ * 不会变成顶层工具结果行，客户端那条"读工具结果"的路在那里永远拿不到数据。
+ *
+ * 这里改用最普通的一条通道：`execute` 把本轮 actions 记下来，客户端用一个
+ * GET 路由取回。路由坏掉最多是"没有按钮"，不会碰会话历史、投影、渲染。
+ */
+const ACTIONS_PATH = '/api/dsh-next-steps/actions'
+const ACTIONS_KEEP = 20
+const actionLog = new Map()
+
+function sessionIdOf(exec) {
+  try {
+    const id = exec?.agent?.session?.id ?? exec?.agent?.id
+    return typeof id === 'string' ? id : ''
+  } catch {
+    return ''
+  }
+}
+
+function recordActions(sessionId, actions, mode) {
+  if (sessionId === '' || !Array.isArray(actions) || actions.length === 0) return
+  const list = actionLog.get(sessionId) ?? []
+  list.push({ at: Date.now(), mode: mode === 'all' ? 'all' : 'latest', actions })
+  if (list.length > ACTIONS_KEEP) list.splice(0, list.length - ACTIONS_KEEP)
+  actionLog.set(sessionId, list)
+}
+
+function actionsView(sessionId) {
+  const entries = actionLog.get(sessionId) ?? []
+  return { entries }
+}
+
+function jsonResponse(value) {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  })
+}
+
+/** 注册 GET 路由；宿主没有 connection 服务就返回 false。 */
+function installRoute(ctx) {
+  const connection = ctx.connection ?? (typeof ctx.get === 'function' ? ctx.get('connection') : undefined)
+  const fetchService = connection === undefined || connection === null ? undefined : connection.fetch
+  if (fetchService === undefined || fetchService === null || typeof fetchService.register !== 'function') return false
+  try {
+    ctx.effect(() => fetchService.register({
+      path: ACTIONS_PATH,
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          const url = new URL(String(request?.url ?? ACTIONS_PATH), 'http://dsh.local')
+          const sessionId = url.searchParams.get('session') ?? ''
+          return jsonResponse(actionsView(sessionId))
+        } catch {
+          return jsonResponse({ entries: [] })
+        }
+      },
+    }), 'dsh-next-steps: actions route')
+    return true
+  } catch {
+    return false
+  }
+}
+
+export { apply, inject, installRoute, name, normalizeActions }

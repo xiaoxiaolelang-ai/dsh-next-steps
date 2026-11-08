@@ -226,4 +226,32 @@ console.log('OK  异步 submit 被拒绝：也算失败，按钮可用')
 submitAsyncReject = false
 
 
+// 10) 路由兜底：模拟 PTC——节点里没有 payload，只有 GET /api/.../actions
+let fetchCalls = 0
+globalThis.fetch = async (url) => {
+  fetchCalls += 1
+  assert.ok(String(url).includes('/api/dsh-next-steps/actions?session='), '必须带上 session 参数')
+  return {
+    ok: true,
+    json: async () => ({ entries: [{ at: Date.now(), mode: 'latest', actions: [{ angle: 'standard', label: '来自路由的动作', prompt: '来自路由的动作' }] }] }),
+  }
+}
+reset()
+const propsRemote = {
+  sessionId: 'remote-1',
+  seq: 90,
+  turn: { start: { seq: 80 }, end: { seq: 90 } },
+  useChat: (sel) => sel({ order: [], nodes: new Map() }),
+}
+render(propsRemote)
+await tick()
+const treeRemote = render(propsRemote)
+const buttonsRemote = buttonsOf(treeRemote)
+assert.equal(fetchCalls, 1, '只应拉一次（有缓存）')
+assert.equal(buttonsRemote.length, 1, '路由有数据就要显示')
+assert.equal(buttonsRemote[0].children[0].children[0], '来自路由的动作')
+console.log('OK  路由兜底：PTC 场景下按钮能显示')
+
+delete globalThis.fetch
+
 console.log('\naction checks passed')
