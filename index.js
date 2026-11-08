@@ -157,8 +157,27 @@ function apply(ctx, config) {
     }
   }
 
+  function pickEmitter(candidate) {
+    if (candidate === undefined || candidate === null) return null
+    if (typeof candidate.on === 'function') return candidate
+    if (candidate.root !== undefined && candidate.root !== null && typeof candidate.root.on === 'function') return candidate.root
+    if (candidate.scope !== undefined && candidate.scope !== null && typeof candidate.scope.on === 'function') return candidate.scope
+    return null
+  }
+
+  reportTurn('ctx-shape', JSON.stringify({
+    on: typeof ctx.on,
+    effect: typeof ctx.effect,
+    tools: typeof (ctx.tools ?? null),
+    get: typeof ctx.get,
+    hasRoot: ctx.root !== undefined && ctx.root !== null,
+    rootOn: ctx.root === undefined || ctx.root === null ? 'n/a' : typeof ctx.root.on,
+  }))
+
+  const emitter = pickEmitter(ctx)
   try {
-    ctx.on('agent/turn-stopping', function onTurnStopping(payload) {
+    if (emitter === null) throw new Error('no emitter on ctx/root/scope')
+    emitter.on('agent/turn-stopping', function onTurnStopping(payload) {
       try {
         const agent = payload === undefined || payload === null ? undefined : payload.agent
         if (config?.fallback !== 'off') maybeGenerate(ctx, config, payload)
@@ -175,6 +194,29 @@ function apply(ctx, config) {
     reportTurn('listener', 'registered')
   } catch (error) {
     reportTurn('listener', 'failed: ' + (error instanceof Error ? error.message : String(error)))
+    // 再试几次：有些上下文要晚一点才具备事件能力
+    let tries = 0
+    const timer = setInterval(() => {
+      tries += 1
+      const late = pickEmitter(ctx)
+      if (late !== null) {
+        clearInterval(timer)
+        try {
+          late.on('agent/turn-stopping', function onTurnStopping(payload) {
+            try {
+              if (config?.fallback !== 'off') maybeGenerate(ctx, config, payload)
+              reportTurn('turn-stopping-late', 'ok')
+            } catch {}
+          })
+          reportTurn('listener', 'registered-late attempt=' + tries)
+        } catch (error2) {
+          reportTurn('listener', 'late-failed: ' + (error2 instanceof Error ? error2.message : String(error2)))
+        }
+        return
+      }
+      if (tries >= 20) clearInterval(timer)
+    }, 1500)
+    if (typeof timer.unref === 'function') timer.unref()
   }
 
   ctx.tools.register({
@@ -201,7 +243,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.17', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.18', mode: history, actions }),
           },
         ]
       },
