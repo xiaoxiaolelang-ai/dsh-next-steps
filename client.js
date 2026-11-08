@@ -3,7 +3,7 @@
  *
  * 数据只走一条路：这一轮自己的工具结果。**没有共享 Map、没有 render 副作用、
  * 没有跨组件传递**——每个轮次尾部只回答一个纯问题：
- *   「在 (本轮起点, 本轮收尾] 之间，有没有一条 suggest_actions 结果？」
+ *   「在 (本轮起点, 本轮收尾] 之间，有没有一条 suggest_next_steps 结果？」
  * 因此历史轮次各自定格在自己的建议上，晚到的结果也会触发重渲染。
  *
  * 轮次边界来自宿主的 TurnTailOwnerProps：`turn.start.seq` / `turn.end.seq`，
@@ -518,7 +518,7 @@ window.__ModuleLoader__.load({
 
         return h('div', {
           className: 'dns-root',
-          'data-tool': 'suggest_actions',
+          'data-tool': 'suggest_next_steps',
           role: 'group',
           'aria-label': t('group.label'),
         },
@@ -550,7 +550,7 @@ window.__ModuleLoader__.load({
         }
         ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
           name: 'tool.call.toolview',
-          key: 'suggest_actions',
+          key: 'suggest_next_steps',
         }, Capture))
         ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
           name: 'conversation.chat.turnTail',
