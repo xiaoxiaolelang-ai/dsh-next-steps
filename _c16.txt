@@ -1,0 +1,16 @@
+fix: put the standing prompt at the very end of the system prompt (0.1.12)
+
+数据：100 轮之后只有 2 / 22 轮真的调用了建议工具（约 9%），远低于早期测到的 70%。
+原因不是工具不可见（请求里有），而是这条收尾要求**没被当回事**。
+
+查了宿主内置段的顺序表：最大的是 10200（DEPLOYMENT_PERSONA_SUFFIX）。
+我们原来用 9899 —— 后面还跟着 STRUCTURED_OUTPUT(9900)、HARNESS_SOURCE(10000)、
+WEB_SURFACE(10100)、DEPLOYMENT_PERSONA_SUFFIX(10200)，实测只占系统提示 73% 的位置。
+收尾要求埋在中段，长回复里自然被挤掉。
+
+改法：
+- 段的 order 改成 10250，排在所有内置段之后（真正的末尾）；
+- 工具描述里补一句 “Call it at the end of every reply, after the prose.” ——
+  工具描述就在工具列表旁边，模型挑工具时一定会看到。
+
+测试断言同步改成 10250（并注明理由）。

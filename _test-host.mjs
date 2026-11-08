@@ -31,7 +31,7 @@ console.log('OK  工具注册形状：parameters/output.render/execute 齐全')
 // 2) 常驻指令：order 与文案
 assert.ok(state.section, 'section registered')
 assert.equal(state.section.name, 'next-steps')
-assert.equal(state.section.order, 9899)
+assert.equal(state.section.order, 10250, '必须排在所有内置段之后（最后一个内置段是 10200）')
 assert.ok(state.section.text.includes('suggest_actions'))
 assert.ok(state.section.text.includes('Every reply gets a call'), '指令必须要求每轮调用')
 assert.ok(state.section.text.includes('only ran tools'), '只跑了工具的轮次也必须调用')

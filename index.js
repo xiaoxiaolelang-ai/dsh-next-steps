@@ -23,6 +23,7 @@ const description = [
   'Give them in the order you want them read: the single `recommended` entry is moved to the first cell of a 2x2 grid.',
   'Use at most one entry per stance, chosen from: cautious (smaller step, verify first), standard (the sensible move),',
   'bold (push the same route harder), alternative (a different route — the current approach is given up), stop (this need not be done at all).',
+  'Call it at the end of every reply, after the prose.',
   'Two to four is the usual number; never pad. Omit `prompt` when the button text is already a sentence the user could send.',
   'This never waits for an answer: it returns immediately and your turn ends normally.',
 ].join(' ')
@@ -107,11 +108,14 @@ function apply(ctx, config) {
   if (promptMode === "always") {
     const systemPrompt = ctx.get("systemPrompt")
     if (systemPrompt !== undefined && systemPrompt !== null && typeof systemPrompt.section === "function") {
-      // 9899：几乎排到系统提示的最后——这条要求越靠近末尾，模型越不容易在中途"忘了收尾"。
+      // 10250：宿主内置段的最大顺序是 10200（DEPLOYMENT_PERSONA_SUFFIX），
+      // 所以用 10250 能排到整段系统提示的**最后**。原来的 9899 后面还跟着
+      // STRUCTURED_OUTPUT / HARNESS_SOURCE / WEB_SURFACE 等段（实测只占 73% 位置），
+      // 收尾要求被埋在中段，是漏调用的直接原因。
       // 包一层：万一别的插件占了同名 section 或宿主 API 变了，也不能连累工具注册。
       try {
         ctx.effect(
-          () => systemPrompt.section({ name: "next-steps", order: 9899, text: PROMPT_TEXT }),
+          () => systemPrompt.section({ name: "next-steps", order: 10250, text: PROMPT_TEXT }),
           "dsh-next-steps: prompt section",
         )
       } catch {}
@@ -143,7 +147,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.4', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.12', mode: history, actions }),
           },
         ]
       },
