@@ -73,6 +73,18 @@ dsh plugin add dsh-next-steps
 
 代价：清掉站点数据（localStorage）后，历史轮次的建议就真的没了——但只影响历史，不影响新的一轮。
 
+## 两种调用形态都支持
+
+DSH 里工具可能有两种调用形态：**native**（模型直接发起工具调用，结果是会话里的顶层工具行）和 **PTC / `run_code`**（模型在程序里 `await tools.xxx()`，结果是 `tool/ptc-dispatch` 事件）。
+
+0.1.x 只在 native 下工作——PTC 会话里永远收不到数据（实测：那类会话的请求里 `tools` 只有一个 `run_code`）。0.2.0 起，插件把每轮的 actions 写进**会话投影**（`sessionProjections`，key `next-steps`）：
+
+- 投影从**事件参数**里取结构化 actions，两种形态都能覆盖；
+- 历史会话靠重放事件自然重建，**不再依赖 localStorage 记忆**；
+- 客户端读 `faceOf('next-steps')`，读不到（旧版宿主）再退回原来的文本通路。
+
+性能上的两条约束写进了测试：不相关的事件必须返回**同一个 state 引用**（宿主据此跳过重算）；坏参数不抛错也不改状态。
+
 ## 已知限制
 
 - 工具结果里那段给客户端读的 JSON（前缀 `dsh-next-steps/v1`）也会进入模型上下文，每次约几百 token。改用 host 的 session projection + `wire.view` 可以消掉，但目前没做。

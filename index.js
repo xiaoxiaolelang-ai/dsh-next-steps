@@ -14,6 +14,8 @@ const inject = ['tools']
 
 /** 客户端按这个前缀认领数据段；换版本就换前缀，旧客户端会自然忽略。 */
 const MARKER = 'dsh-next-steps/v1'
+/** 工具名：注册、投影、渲染三处必须一致，所以只留一个来源。 */
+const TOOL_NAME = 'suggest_actions'
 const ANGLES = ['cautious', 'standard', 'bold', 'alternative', 'stop']
 const MAX_ACTIONS = 4
 
@@ -103,6 +105,8 @@ function apply(ctx, config) {
   const maxActions = Number.isInteger(rawMax) && rawMax > 0 ? rawMax : MAX_ACTIONS
   const history = config?.history === 'all' ? 'all' : 'latest'
 
+  if (typeof installProjection === 'function') installProjection(ctx, maxActions, history)
+
   const promptMode = config?.prompt === "off" ? "off" : "always"
   if (promptMode === "always") {
     const systemPrompt = ctx.get("systemPrompt")
@@ -120,7 +124,7 @@ function apply(ctx, config) {
   }
 
   ctx.tools.register({
-    name: 'suggest_actions',
+    name: TOOL_NAME,
     description,
     parameters,
     output: {
@@ -143,7 +147,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.4', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.2.0', mode: history, actions }),
           },
         ]
       },
@@ -154,4 +158,81 @@ function apply(ctx, config) {
   })
 }
 
-export { apply, inject, name, normalizeActions }
+/**
+ * 会话投影：把每轮的 actions 记在会话事件流上，客户端直接读投影。
+ *
+ * 为什么需要：PTC（run_code）会话里工具是在程序内部被调用的，产生的是
+ * `tool/ptc-dispatch` 而不是顶层工具结果——原来的"在工具结果文本里找一段 JSON"
+ * 那条路在那里永远收不到数据。投影从**事件参数**里取结构化 actions，
+ * 两种调用形态都能覆盖，而且历史会话靠重放事件自然重建。
+ *
+ * 性能：apply 对每个会话事件都会跑一次，所以第一件事就是比较事件类型，
+ * 不是工具调用立刻返回同一个 state（引用不变，宿主据此跳过重算）。
+ */
+const PROJECTION_KEY = 'next-steps'
+const PROJECTION_MAX = 200
+
+function actionsFromArguments(raw) {
+  let value = raw
+  if (typeof raw === 'string') {
+    try {
+      value = JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+  if (value === null || typeof value !== 'object') return null
+  const actions = value.actions
+  return Array.isArray(actions) && actions.length > 0 ? actions : null
+}
+
+function projectionApply(state, event, maxActions) {
+  try {
+    if (event === null || event === undefined) return state
+    const type = event.type
+    if (type !== 'tool/call' && type !== 'tool/ptc-dispatch') return state
+    const name = event.data === undefined || event.data === null ? undefined : event.data.name
+    if (name !== TOOL_NAME) return state
+    const actions = actionsFromArguments(event.data.arguments)
+    if (actions === null) return state
+    const normalized = normalizeActions(actions, maxActions)
+    if (normalized.length === 0) return state
+    const seq = event.seq
+    if (!Number.isInteger(seq)) return state
+    const items = state.items.concat([{ seq, actions: normalized }]).slice(-PROJECTION_MAX)
+    return { items }
+  } catch {
+    return state
+  }
+}
+
+/** 注册投影单元；宿主没有这个服务（旧版本）就返回 false，由调用方降级。 */
+function installProjection(ctx, maxActions, history) {
+  const service = ctx.get('sessionProjections')
+  if (service === undefined || service === null || typeof service.register !== 'function') return false
+  const mode = history === 'all' ? 'all' : 'latest'
+  const unit = {
+    key: PROJECTION_KEY,
+    stateVersion: 1,
+    init: () => ({ items: [], mode }),
+    apply: (state, event) => projectionApply(state, event, maxActions),
+    wire: { view: (state) => ({ items: state.items, mode: state.mode }) },
+  }
+  try {
+    ctx.effect(() => {
+      const dispose = service.register(unit)
+      return () => {
+        try {
+          if (typeof dispose === 'function') dispose()
+        } catch {
+          // 卸载失败不影响会话
+        }
+      }
+    }, 'dsh-next-steps: projection unit')
+    return true
+  } catch {
+    return false
+  }
+}
+
+export { apply, inject, installProjection, name, normalizeActions, PROJECTION_KEY }

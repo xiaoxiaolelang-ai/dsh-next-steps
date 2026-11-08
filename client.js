@@ -248,6 +248,29 @@ window.__ModuleLoader__.load({
      * 提交与填入
      * ------------------------------------------------------------------ */
 
+    /**
+     * 会话投影的读取面：`ctx.sessions.binding(id).session.projections.faceOf(key)`。
+     * 拿不到就返回 null —— 旧版宿主没有这个服务，走原有的文本通路。
+     */
+    const PROJECTION_KEY = 'next-steps'
+
+    function projectionFace(ctx, sessionId) {
+      try {
+        const sessions = ctx.get('sessions')
+        if (sessions === undefined || sessions === null || typeof sessions.binding !== 'function') return null
+        const binding = sessions.binding(sessionId)
+        const projections = binding === undefined || binding === null ? undefined : binding.session?.projections
+        if (projections === undefined || projections === null || typeof projections.faceOf !== 'function') return null
+        const face = projections.faceOf(PROJECTION_KEY)
+        return face !== undefined && face !== null && typeof face.getSnapshot === 'function' ? face : null
+      } catch {
+        return null
+      }
+    }
+
+    const EMPTY_SUBSCRIBE = () => () => {}
+    const EMPTY_READ = () => null
+
     function composerShell(ctx, sessionId) {
       try {
         const conversation = ctx.get('conversation')
@@ -401,6 +424,34 @@ window.__ModuleLoader__.load({
           () => (useChat === undefined ? [] : buildIndex(store, order)),
           [useChat, store, order],
         )
+        /* 投影优先：两种调用形态（native / PTC）都能覆盖，历史会话靠重放事件重建。 */
+        const face = React.useMemo(() => projectionFace(ctx, sessionId), [ctx, sessionId])
+        const subscribeProjection = React.useCallback(
+          (listener) => (face === null ? () => {} : face.subscribe(listener)),
+          [face],
+        )
+        const readProjection = React.useCallback(() => (face === null ? null : face.getSnapshot()), [face])
+        const projected = React.useSyncExternalStore(
+          face === null ? EMPTY_SUBSCRIBE : subscribeProjection,
+          face === null ? EMPTY_READ : readProjection,
+          EMPTY_READ,
+        )
+
+        const fromProjection = React.useMemo(() => {
+          const items = projected === null || projected === undefined ? undefined : projected.items
+          if (!Array.isArray(items) || typeof endSeq !== 'number') return null
+          for (let i = items.length - 1; i >= 0; i -= 1) {
+            const item = items[i]
+            if (item === null || typeof item !== 'object' || typeof item.seq !== 'number') continue
+            if (item.seq > endSeq) continue
+            if (startSeq !== undefined && item.seq <= startSeq) return null
+            return Array.isArray(item.actions) && item.actions.length > 0
+              ? { mode: projected.mode === 'all' ? 'all' : 'latest', actions: item.actions }
+              : null
+          }
+          return null
+        }, [projected, endSeq, startSeq])
+
         const readFallback = () => fallbackOf(sessionId)
         const readLatest = () => maxTailSeqOf(sessionId)
         const fallback = React.useSyncExternalStore(subscribeFallback, readFallback, readFallback)
@@ -447,7 +498,7 @@ window.__ModuleLoader__.load({
           () => (payload === null ? recallTail(sessionId, endSeq) : null),
           [payload, sessionId, endSeq],
         )
-        const resolved = payload ?? stored ?? ((index.length === 0 || unattributable) && endSeq !== undefined && endSeq === latestEnd
+        const resolved = fromProjection ?? payload ?? stored ?? ((index.length === 0 || unattributable) && endSeq !== undefined && endSeq === latestEnd
           ? fallback.payload
           : null)
 

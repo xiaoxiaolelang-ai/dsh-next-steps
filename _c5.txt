@@ -1,0 +1,21 @@
+feat: read actions from a session projection, so PTC sessions work too (0.2.0)
+
+诊断：诗情词意那个会话是 PTC（run_code）模式——请求里 tools 只有一个 run_code，
+工具在程序里 await 调用；模型其实成功调用过 suggest_actions 一次，但它落在
+tool/ptc-dispatch 事件上，不产生顶层工具结果行，客户端永远收不到。
+
+改法（第一步：加通路，旧通路保留做 fallback）：
+- host 注册 session projection unit（key next-steps, stateVersion 1）：
+  apply 只处理 tool/call 与 tool/ptc-dispatch 两种事件，从 **arguments**
+  （native 是字符串、PTC 是对象）取结构化 actions，按会话 seq 记录，封顶 200 条；
+- 客户端优先读 faceOf('next-steps')，按「起点 < seq <= 收尾」归到本轮；
+  读不到再走原来的 payload / 缓存 / 采集通道；
+- 投影 view 带上 history 模式，latest 语义保持不变。
+
+性能契约（写进测试）：
+- 不相关事件返回同一个 state 引用，宿主据此跳过重算；
+- 坏参数不抛错、不改状态；
+- 客户端只订阅已有的投影面，不加轮询、不加监听器。
+
+测试 39 项：13 / 5 / 5 / 9 / 7，其中新增 _test-projection.mjs 7 项、
+客户端投影通路 2 项。
