@@ -1,9 +1,0 @@
-fix: treat a rejected async submit as a failed send
-
-submit() 也可能返回 Promise。原来只捕获同步抛出：异步拒绝会被当成“已发送”，
-按钮锁死而实际没发出去。
-
-现在 thenable 结果也接上 resolve/reject。测试补一条：异步拒绝时按钮仍可用；
-把守卫去掉后这条用例会以未捕获拒绝直接失败（不是静默通过）。
-
-自检 30 项：13 / 5 / 5 / 7。
