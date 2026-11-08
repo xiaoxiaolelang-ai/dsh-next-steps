@@ -167,6 +167,7 @@ function apply(ctx, config) {
  */
 const ACTIONS_PATH = '/api/dsh-next-steps/actions'
 const ACTIONS_KEEP = 20
+const ACTIONS_SESSIONS = 200
 const actionLog = new Map()
 
 function sessionIdOf(exec) {
@@ -183,7 +184,14 @@ function recordActions(sessionId, actions, mode) {
   const list = actionLog.get(sessionId) ?? []
   list.push({ at: Date.now(), mode: mode === 'all' ? 'all' : 'latest', actions })
   if (list.length > ACTIONS_KEEP) list.splice(0, list.length - ACTIONS_KEEP)
+  actionLog.delete(sessionId)
   actionLog.set(sessionId, list)
+  // 长跑宿主里会话会一直增加，只保留最近的 ACTIONS_SESSIONS 个（Map 保持插入序）
+  while (actionLog.size > ACTIONS_SESSIONS) {
+    const oldest = actionLog.keys().next()
+    if (oldest.done === true) break
+    actionLog.delete(oldest.value)
+  }
 }
 
 function actionsView(sessionId) {

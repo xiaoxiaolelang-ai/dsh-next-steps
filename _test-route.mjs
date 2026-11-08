@@ -63,4 +63,14 @@ const legacy = { get: () => undefined, effect: (fn) => fn(), tools: { register: 
 assert.equal(mod.installRoute(legacy), false, '没有 connection 服务时返回 false')
 console.log('OK  没有 connection 服务：降级为 false')
 
+// 会话表封顶：推进 250 个会话后，最早的应该被挤掉
+for (let i = 0; i < 250; i += 1) {
+  await tool.execute({ actions }, { agent: { session: { id: 'cap-' + i } } })
+}
+const evicted = await (await route.fetch({ url: '/api/dsh-next-steps/actions?session=cap-0' })).json()
+const kept = await (await route.fetch({ url: '/api/dsh-next-steps/actions?session=cap-249' })).json()
+assert.deepEqual(evicted.entries, [], '超过上限后最早的会话必须被挤掉')
+assert.equal(kept.entries.length, 1, '最近的会话必须还在')
+console.log('OK  会话表封顶：只保留最近 200 个会话')
+
 console.log('\nroute checks passed')

@@ -254,4 +254,32 @@ console.log('OK  路由兜底：PTC 场景下按钮能显示')
 
 delete globalThis.fetch
 
+// 11) 缓存必须按轮次区分：同一会话的下一轮不能拿到上一轮的动作
+let round = 0
+fetchCalls = 0
+globalThis.fetch = async () => {
+  round += 1
+  return {
+    ok: true,
+    json: async () => ({ entries: [{ at: Date.now(), mode: 'latest', actions: [{ angle: 'standard', label: '第' + round + '轮', prompt: 'p' }] }] }),
+  }
+}
+reset()
+const propsRound1 = { sessionId: 'round-1', seq: 100, turn: { start: { seq: 90 }, end: { seq: 100 } }, useChat: (sel) => sel({ order: [], nodes: new Map() }) }
+render(propsRound1)
+await tick()
+const r1 = buttonsOf(render(propsRound1))
+assert.equal(r1.length, 1)
+assert.equal(r1[0].children[0].children[0], '第1轮')
+
+const propsRound2 = { sessionId: 'round-1', seq: 120, turn: { start: { seq: 110 }, end: { seq: 120 } }, useChat: (sel) => sel({ order: [], nodes: new Map() }) }
+render(propsRound2)
+await tick()
+const r2 = buttonsOf(render(propsRound2))
+assert.equal(r2.length, 1, '第二轮也要显示')
+assert.equal(r2[0].children[0].children[0], '第2轮', '第二轮必须是新一轮的动作，不能复用上一轮的缓存')
+console.log('OK  缓存按轮次区分：第二轮拿到的是新动作')
+
+delete globalThis.fetch
+
 console.log('\naction checks passed')

@@ -484,7 +484,8 @@ window.__ModuleLoader__.load({
         const needRemote = resolved === null && endSeq !== undefined && endSeq === latestEnd && sessionId !== ''
         React.useEffect(() => {
           if (!needRemote) return undefined
-          const cached = remoteCache.get(sessionId)
+          const cacheKey = sessionId + ':' + endSeq
+          const cached = remoteCache.get(cacheKey)
           if (cached !== undefined) {
             setRemote({ endSeq, mode: cached.mode, actions: cached.actions })
             return undefined
@@ -492,7 +493,11 @@ window.__ModuleLoader__.load({
           let alive = true
           fetchRemoteActions(sessionId).then((entry) => {
             if (!alive || entry === null) return
-            remoteCache.set(sessionId, entry)
+            if (remoteCache.size > 50) {
+              const oldest = remoteCache.keys().next()
+              if (oldest.done !== true) remoteCache.delete(oldest.value)
+            }
+            remoteCache.set(cacheKey, entry)
             setRemote({ endSeq, mode: entry.mode, actions: entry.actions })
           })
           return () => {
