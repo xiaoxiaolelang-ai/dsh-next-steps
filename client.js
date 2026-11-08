@@ -135,6 +135,60 @@ window.__ModuleLoader__.load({
       return fallbackBySession.get(sessionId) ?? EMPTY_FALLBACK
     }
 
+    /* ------------------------------------------------------------------ *
+     * 轮次级持久化：重启后历史轮次还原不出建议时，用自己记下的那份
+     *
+     * 为什么需要：工具结果在会话日志里是全的，但重启后宿主重建出来的节点
+     * 形状不一定还能被 findPayload 认出来（实时流和重放是两条路径）。
+     * 这里按「会话 + 该轮收尾 seq」存一份，键就是轮次的持久序号，
+     * 所以不会跨轮串味；取不到也只是没有，绝不回显上一轮。
+     * ------------------------------------------------------------------ */
+
+    const TAIL_STORE = 'dsh-next-steps:tails:v1'
+    const TAIL_STORE_MAX = 400
+
+    function readTailStore() {
+      try {
+        const raw = window.localStorage.getItem(TAIL_STORE)
+        const parsed = raw === null ? null : JSON.parse(raw)
+        return parsed !== null && typeof parsed === 'object' ? parsed : {}
+      } catch {
+        return {}
+      }
+    }
+
+    function tailKey(sessionId, endSeq) {
+      return sessionId + '|' + String(endSeq)
+    }
+
+    function recallTail(sessionId, endSeq) {
+      if (sessionId === '' || typeof endSeq !== 'number') return null
+      const saved = readTailStore()[tailKey(sessionId, endSeq)]
+      if (saved === null || typeof saved !== 'object') return null
+      const actions = Array.isArray(saved.actions) ? saved.actions : null
+      if (actions === null || actions.length === 0) return null
+      return { mode: saved.mode === 'all' ? 'all' : 'latest', actions }
+    }
+
+    function rememberTail(sessionId, endSeq, payload) {
+      if (sessionId === '' || typeof endSeq !== 'number' || payload === null) return
+      if (!Array.isArray(payload.actions) || payload.actions.length === 0) return
+      try {
+        const all = readTailStore()
+        all[tailKey(sessionId, endSeq)] = {
+          mode: payload.mode === 'all' ? 'all' : 'latest',
+          actions: payload.actions,
+        }
+        const keys = Object.keys(all)
+        if (keys.length > TAIL_STORE_MAX) {
+          for (const key of keys.slice(0, keys.length - TAIL_STORE_MAX)) delete all[key]
+        }
+        window.localStorage.setItem(TAIL_STORE, JSON.stringify(all))
+      } catch {
+        // 存不下就只靠当次会话内的通道
+      }
+    }
+
     function Capture(props) {
       const payload = React.useMemo(() => {
         try {
@@ -335,9 +389,19 @@ window.__ModuleLoader__.load({
         // 节点形状对不上时的兜底：只在「这一轮没有任何可用序号」时启用，
         // 且仍然只挂最新一轮——绝不因为兜底把上一轮的建议顶上来。
         const unattributable = index.every((entry) => typeof entry.seq !== 'number')
-        const resolved = payload ?? ((index.length === 0 || unattributable) && endSeq !== undefined && endSeq === latestEnd
+        // 重启后节点重放认不出数据段时，用记下的那一份；键是轮次收尾 seq，
+        // 所以只可能是"这一轮自己的建议"，不会把上一轮的顶上来。
+        const stored = React.useMemo(
+          () => (payload === null ? recallTail(sessionId, endSeq) : null),
+          [payload, sessionId, endSeq],
+        )
+        const resolved = payload ?? stored ?? ((index.length === 0 || unattributable) && endSeq !== undefined && endSeq === latestEnd
           ? fallback.payload
           : null)
+
+        React.useEffect(() => {
+          if (payload !== null) rememberTail(sessionId, endSeq, payload)
+        }, [payload, sessionId, endSeq])
 
         if (resolved === null || resolved.actions.length === 0) return null
         if (resolved.mode === 'latest' && latestEnd !== undefined && endSeq !== latestEnd) return null

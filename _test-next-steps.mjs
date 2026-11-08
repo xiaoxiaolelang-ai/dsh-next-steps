@@ -131,4 +131,37 @@ console.log('OK  会话隔离：s2 独立判定最新一轮')
 
 console.log('OK  兜底通道：只有最新一轮')
 
+// 10) 重启还原：节点重放认不出数据段时，用按轮次记下的那一份
+const memory = new Map()
+globalThis.window.localStorage = {
+  getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+  setItem: (key, value) => { memory.set(key, String(value)) },
+  removeItem: (key) => { memory.delete(key) },
+}
+memory.set('dsh-next-steps:tails:v1', JSON.stringify({
+  're|40': { mode: 'latest', actions: [{ angle: 'standard', label: 'R1' }] },
+}))
+const noNodes = { order: [], nodes: new Map() }
+assert.deepEqual(
+  labelsOf(settled({ sessionId: 're', seq: 40, turn: turnB, useChat: (sel) => sel(noNodes) })),
+  [{ label: 'R1', tier: 'normal', span: '1 / -1' }],
+  '重启后节点认不出数据段：按轮次还原出 R1',
+)
+console.log('OK  重启还原：按轮次记忆恢复 R1')
+
+// 11) 还原不能串会话：别的会话同一 seq 的那份不能用
+assert.equal(
+  settled({ sessionId: 'other', seq: 40, turn: turnB, useChat: (sel) => sel(noNodes) }),
+  null,
+  '另一个会话不得复用 re 会话的建议',
+)
+console.log('OK  重启还原：不串会话')
+
+// 12) 实时渲染时要顺手写进记忆，供下次重启用
+const liveWrite = mk([[35, [{ angle: 'standard', label: 'W1' }]]])
+settled({ sessionId: 'wr', seq: 40, turn: turnB, useChat: (sel) => sel(liveWrite) })
+const savedAll = JSON.parse(memory.get('dsh-next-steps:tails:v1') ?? '{}')
+assert.deepEqual(savedAll['wr|40']?.actions?.map((a) => a.label), ['W1'], '实时渲染后必须把本轮建议写进记忆')
+console.log('OK  实时渲染写入轮次记忆')
+
 console.log('\nall checks passed')
