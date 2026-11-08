@@ -9,6 +9,26 @@
  * Schema 直接注册，零依赖；排序/去重/截断也在这里算一次，客户端照抄。
  */
 
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+
+/**
+ * 探针日志：只写 DSH_HOME/dsh-next-steps/turn.log。
+ * 目的是确认 agent/turn-stopping 真的会在轮次关闭前触发、能拿到 agent 与 turn，
+ * 以及本轮有没有调用过 next_steps。
+ */
+function reportTurn(stage, detail) {
+  try {
+    const home = process.env.DSH_HOME === undefined || process.env.DSH_HOME === '' ? join(homedir(), '.dsh') : process.env.DSH_HOME
+    const file = join(home, 'dsh-next-steps', 'turn.log')
+    mkdirSync(dirname(file), { recursive: true })
+    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), stage, detail }) + '\n')
+  } catch {
+    // 探针不能影响插件
+  }
+}
+
 const name = 'dsh-next-steps'
 const inject = ['tools']
 
@@ -123,6 +143,25 @@ function apply(ctx, config) {
     }
   }
 
+  try {
+    ctx.on('agent/turn-stopping', function onTurnStopping(payload) {
+      try {
+        const agent = payload === undefined || payload === null ? undefined : payload.agent
+        reportTurn('turn-stopping', JSON.stringify({
+          keys: payload === undefined || payload === null ? [] : Object.keys(payload),
+          turn: payload === undefined || payload === null ? null : payload.turn,
+          sessionId: agent === undefined || agent === null ? null : agent.id ?? agent.session?.id ?? null,
+          scopedThis: this !== undefined && this !== null,
+        }))
+      } catch (error) {
+        reportTurn('turn-stopping-error', error instanceof Error ? error.message : String(error))
+      }
+    })
+    reportTurn('listener', 'registered')
+  } catch (error) {
+    reportTurn('listener', 'failed: ' + (error instanceof Error ? error.message : String(error)))
+  }
+
   ctx.tools.register({
     name: 'suggest_actions',
     description,
@@ -147,7 +186,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.12', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.13', mode: history, actions }),
           },
         ]
       },
