@@ -105,9 +105,7 @@ function apply(ctx, config) {
   const maxActions = Number.isInteger(rawMax) && rawMax > 0 ? rawMax : MAX_ACTIONS
   const history = config?.history === 'all' ? 'all' : 'latest'
 
-  // YAML 会把裸写的 on/off 解析成布尔，所以两种写法都要认。
-  const projectionOn = config?.projection !== 'off' && config?.projection !== false
-  if (typeof installProjection === 'function') installProjection(ctx, maxActions, history, projectionOn)
+  if (typeof installProjection === 'function') installProjection(ctx, maxActions, history)
 
   const promptMode = config?.prompt === "off" ? "off" : "always"
   if (promptMode === "always") {
@@ -208,52 +206,17 @@ function projectionApply(state, event, maxActions) {
   }
 }
 
-/**
- * 宿主对投影单元的要求：`stateSchema.parse(row.val)` 和
- * `wire.viewSchema.parse(wire.view(state))` 都会被**直接调用**。
- * 漏掉这两个 schema 会让整个会话的历史投影读取失败（实测：整段会话报
- * "历史加载失败 … reading 'parse'"）。
- *
- * 这里是 duck-typed 的最小实现：只提供宿主用到的方法（`.parse`），
- * 形状不对就回退到空状态——不抛错，也不会把脏数据带出去。
- */
-function projectionShape(shape) {
-  const normalize = (value) => {
-    try {
-      if (value !== null && typeof value === 'object') {
-        if (shape === 'state') {
-          if (Array.isArray(value.items) && (value.mode === 'all' || value.mode === 'latest')) return value
-        } else if (Array.isArray(value.items) && (value.mode === 'all' || value.mode === 'latest')) {
-          return { items: value.items, mode: value.mode }
-        }
-      }
-    } catch {
-      // 落到下面的兜底
-    }
-    return shape === 'state' ? { items: [], mode: 'latest' } : { items: [], mode: 'latest' }
-  }
-  return {
-    parse: normalize,
-    safeParse: (value) => ({ success: true, data: normalize(value) }),
-  }
-}
-
 /** 注册投影单元；宿主没有这个服务（旧版本）就返回 false，由调用方降级。 */
-function installProjection(ctx, maxActions, history, enabled) {
-  if (enabled !== true) return false
+function installProjection(ctx, maxActions, history) {
   const service = ctx.get('sessionProjections')
   if (service === undefined || service === null || typeof service.register !== 'function') return false
   const mode = history === 'all' ? 'all' : 'latest'
   const unit = {
     key: PROJECTION_KEY,
     stateVersion: 1,
-    stateSchema: projectionShape('state'),
     init: () => ({ items: [], mode }),
     apply: (state, event) => projectionApply(state, event, maxActions),
-    wire: {
-      viewSchema: projectionShape('view'),
-      view: (state) => ({ items: state.items, mode: state.mode }),
-    },
+    wire: { view: (state) => ({ items: state.items, mode: state.mode }) },
   }
   try {
     ctx.effect(() => {

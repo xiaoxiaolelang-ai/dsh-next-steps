@@ -5,5 +5,3 @@
         maxActions: 4
         history: latest
         prompt: always
-        # on=从会话投影读（PTC 会话也能显示）；off=退回旧的文本通路，出事时的开关
-        projection: 'on'
