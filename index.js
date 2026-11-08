@@ -29,14 +29,12 @@ const description = [
 
 /** 常驻提示：让模型每轮都调用一次工具，而不是靠它自己记得。 */
 const PROMPT_TEXT = [
-  "End the reply with the `suggest_actions` tool. Every reply gets a call, except a bare acknowledgement with nothing left to do.",
-  "Quality bar: each step must follow from the work of this turn and name the file, command, error or value involved, so it can be acted on without re-reading the conversation.",
-  "The first item is the next action in the current pipeline and it carries `recommended`. Judge it by asking: if the user only said continue, what would they actually do next? Anything already finished is not a step, move to whatever follows it.",
-  "When that next action happens outside the chat (restarting the app, publishing a release, merging a pull request), write the item as the message the user sends right after doing it, for example I have restarted, carry on. Never write it as an instruction telling them to go do it.",
-  "The remaining items are branches, not four equal options: verification, rollback, a different route. Zero to three of them. Never pad.",
-  "Chain rule: a freshly published artifact moves downstream. Release done means the next step is updating what points at the new version (entry file, pull request, merge), not re-checking what is already verified.",
-  "`label` is the action written in the conversation language; `prompt` is the exact message the user would send, self-contained with paths and the detail a fresh turn needs.",
-  "Never: repeating finished work, asking the user to confirm something already confirmed, or generic filler (continue, optimise further, check again).",
+  "End the reply with the `suggest_actions` tool. Every reply gets a call, except a bare acknowledgement.",
+  "The first item is the next action and carries `recommended`: what the user would do next if they only said continue. Never restate finished work.",
+  "If that action happens outside the chat, write the item as the message the user sends afterwards, not as an instruction.",
+  "Ground each item in this turn: name the file, command, error or value involved. One real item beats four padded ones.",
+  "`label` is the action in the conversation language; `prompt` is the exact message to send, with the detail a fresh turn needs.",
+  "No generic filler; never ask to confirm what is already confirmed.",
 ].join(" ")
 
 const parameters = {

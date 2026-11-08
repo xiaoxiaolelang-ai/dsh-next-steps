@@ -1,0 +1,14 @@
+refactor: shrink the standing prompt to six general rules (116 words)
+
+用户反馈两条：提示词偏大，而且绑定了具体场景（release / pipeline / entry file
+这些都是我们这几天自己的工作流，换成别的任务就不成立）。
+
+- 字数：247 → 116 词（约 346 → 162 token），句子从 8 行压到 6 条规则；
+- 去掉 Chain rule（发布后同步下游引用）与括号里的场景举例，改为通用表述：
+  “如果这个动作发生在聊天外，就把它写成用户完成后会发的那句话”；
+- 保留的四条核心：每轮调用、首条=下一步且 recommended、落到具体对象、
+  一条真的胜过四条凑数；外加禁止填充与再确认。
+
+测试加了两个“防回潮”断言：提示词词数 ≤ 200；不得出现 restart / release /
+pull request / merge / pipeline / chain / downstream / entry file / commit
+这批场景词。换句话说，以后谁想再往里塞具体场景，CI 会拦住。
