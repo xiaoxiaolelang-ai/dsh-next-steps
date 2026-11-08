@@ -1,33 +1,13 @@
 /**
  * 下一步建议（dsh-next-steps）—— Host 半边。
  *
- * 只做一件事：注册 `next_steps` 工具。模型调它，参数里带 2-4 条建议，
+ * 只做一件事：注册 `suggest_actions` 工具。模型调它，参数里带 2-4 条建议，
  * 工具立刻返回，这一轮正常结束——不等人、不打断。
  *
  * 为什么不 import 宿主的包：本插件以**本地目录**安装，模块解析从插件目录
  * 往上走，拿不到 dsh 安装目录里的 @deepseek-ai/*。所以这里只用明文 JSON
  * Schema 直接注册，零依赖；排序/去重/截断也在这里算一次，客户端照抄。
  */
-
-import { appendFileSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-
-/**
- * 注册诊断：工具/提示段/路由三处各自成功还是失败，写进
- * DSH_HOME/dsh-next-steps/load.log。插件加载失败时界面没有提示，
- * 这个文件是唯一能自证的地方。
- */
-function reportLoad(stage, detail) {
-  try {
-    const home = process.env.DSH_HOME === undefined || process.env.DSH_HOME === '' ? join(homedir(), '.dsh') : process.env.DSH_HOME
-    const file = join(home, 'dsh-next-steps', 'load.log')
-    mkdirSync(dirname(file), { recursive: true })
-    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), stage, detail }) + '\n')
-  } catch {
-    // 诊断不能反过来影响加载
-  }
-}
 
 const name = 'dsh-next-steps'
 const inject = ['tools']
@@ -49,7 +29,7 @@ const description = [
 
 /** 常驻提示：让模型每轮都调用一次工具，而不是靠它自己记得。 */
 const PROMPT_TEXT = [
-  "End the reply with the `next_steps` tool. Every reply gets a call, except a bare acknowledgement.",
+  "End the reply with the `suggest_actions` tool. Every reply gets a call, except a bare acknowledgement.",
   "A turn that only ran tools still counts: the reply is what you write after them, so it ends with a call too.",
   "The first item is the next action and carries `recommended`: what the user would do next if they only said continue. Never restate finished work.",
   "If that action happens outside the chat, write the item as the message the user sends afterwards, not as an instruction.",
@@ -134,16 +114,13 @@ function apply(ctx, config) {
           () => systemPrompt.section({ name: "next-steps", order: 9899, text: PROMPT_TEXT }),
           "dsh-next-steps: prompt section",
         )
-        reportLoad('section', 'registered')
-      } catch (error) {
-        reportLoad('section', 'failed: ' + (error instanceof Error ? error.message : String(error)))
-      }
+      } catch {}
 
     }
   }
 
-  const definition = {
-    name: 'next_steps',
+  ctx.tools.register({
+    name: 'suggest_actions',
     description,
     parameters,
     output: {
@@ -166,163 +143,15 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.11', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.4', mode: history, actions }),
           },
         ]
       },
     },
-    async execute(args, exec) {
-      const actions = normalizeActions(args?.actions, maxActions)
-      recordActions(sessionIdOf(exec), actions, history)
-      return { shown: actions.length > 0 }
+    async execute(args) {
+      return { shown: normalizeActions(args?.actions, maxActions).length > 0 }
     },
-  }
-
-  try {
-    ctx.tools.register(definition)
-    let visible = 'n/a'
-  try {
-    const registry = ctx.tools
-    if (typeof registry.get === 'function') visible = registry.get('next_steps') === undefined ? 'global-missing' : 'global-ok'
-    if (typeof registry.definitions === 'function') {
-      const all = registry.definitions()
-      visible += ' defs=' + (Array.isArray(all) ? all.length : '?')
-      visible += ' has=' + (Array.isArray(all) && all.some((d) => d !== null && d !== undefined && d.name === 'next_steps'))
-    }
-  } catch (error) {
-    visible = 'probe-failed: ' + (error instanceof Error ? error.message : String(error))
-  }
-  reportLoad('tool', 'registered ' + visible + ' ' + JSON.stringify({
-      hasPrompt: typeof ctx.get === 'function' && ctx.get('systemPrompt') !== undefined,
-      hasConnection: typeof ctx.get === 'function' && ctx.get('connection') !== undefined,
-      hasTools: typeof ctx.get === 'function' && ctx.get('tools') !== undefined,
-    }))
-  } catch (error) {
-    reportLoad('tool', 'failed: ' + (error instanceof Error ? error.message : String(error)))
-  }
-
-  /* 探针已经证明：全局层只有我们这一个工具（defs=1），而 Agent 能看到的 153 个
-     工具全部来自各自的作用域。所以只注册全局不够——同时注册进每个 Agent 的
-     作用域；作用域注册不受全局限制影响，也一定出现在该 Agent 的工具集里。 */
-  const registeredAgents = new WeakSet()
-  try {
-    ctx.on('agent/created', function onAgentCreated(payload) {
-      try {
-        const agent = payload === undefined || payload === null ? undefined : payload.agent
-        if (agent === undefined || agent === null || registeredAgents.has(agent)) return
-        const scopedTools = agent.ctx === undefined || agent.ctx === null ? undefined : agent.ctx.tools
-        if (scopedTools === undefined || scopedTools === null || typeof scopedTools.register !== 'function') return
-        registeredAgents.add(agent)
-        scopedTools.register(definition)
-        reportLoad('scoped', 'registered')
-      } catch (error) {
-        reportLoad('scoped', 'failed: ' + (error instanceof Error ? error.message : String(error)))
-      }
-    })
-  } catch (error) {
-    reportLoad('scoped', 'listen-failed: ' + (error instanceof Error ? error.message : String(error)))
-  }
-
-  if (typeof installRoute === 'function') installRoute(ctx)
-}
-
-/**
- * PTC 会话（run_code）里工具是在程序内部被调用的：结果只进 `tool/ptc-dispatch`，
- * 不会变成顶层工具结果行，客户端那条"读工具结果"的路在那里永远拿不到数据。
- *
- * 这里改用最普通的一条通道：`execute` 把本轮 actions 记下来，客户端用一个
- * GET 路由取回。路由坏掉最多是"没有按钮"，不会碰会话历史、投影、渲染。
- */
-const ACTIONS_PATH = '/api/dsh-next-steps/actions'
-const ACTIONS_KEEP = 20
-const ACTIONS_SESSIONS = 200
-const actionLog = new Map()
-
-function sessionIdOf(exec) {
-  try {
-    const id = exec?.agent?.session?.id ?? exec?.agent?.id
-    return typeof id === 'string' ? id : ''
-  } catch {
-    return ''
-  }
-}
-
-function recordActions(sessionId, actions, mode) {
-  if (sessionId === '' || !Array.isArray(actions) || actions.length === 0) return
-  const list = actionLog.get(sessionId) ?? []
-  list.push({ at: Date.now(), mode: mode === 'all' ? 'all' : 'latest', actions })
-  if (list.length > ACTIONS_KEEP) list.splice(0, list.length - ACTIONS_KEEP)
-  actionLog.delete(sessionId)
-  actionLog.set(sessionId, list)
-  // 长跑宿主里会话会一直增加，只保留最近的 ACTIONS_SESSIONS 个（Map 保持插入序）
-  while (actionLog.size > ACTIONS_SESSIONS) {
-    const oldest = actionLog.keys().next()
-    if (oldest.done === true) break
-    actionLog.delete(oldest.value)
-  }
-}
-
-function actionsView(sessionId) {
-  const entries = actionLog.get(sessionId) ?? []
-  return { entries }
-}
-
-function jsonResponse(value) {
-  return new Response(JSON.stringify(value), {
-    status: 200,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   })
 }
 
-/** 注册 GET 路由；宿主没有 connection 服务就返回 false。 */
-let routeInstalled = false
-
-function installRoute(ctx) {
-  if (routeInstalled) return false
-  const connection = ctx.connection ?? (typeof ctx.get === 'function' ? ctx.get('connection') : undefined)
-  const fetchService = connection === undefined || connection === null ? undefined : connection.fetch
-  if (fetchService === undefined || fetchService === null || typeof fetchService.register !== 'function') return false
-  routeInstalled = true
-  try {
-    ctx.effect(() => {
-      const registered = fetchService.register({
-      path: ACTIONS_PATH,
-      methods: ['GET'],
-      requestBody: 'buffered',
-      fetch: async (request) => {
-        try {
-          const url = new URL(String(request?.url ?? ACTIONS_PATH), 'http://dsh.local')
-          const sessionId = url.searchParams.get('session') ?? ''
-          return jsonResponse(actionsView(sessionId))
-        } catch {
-          return jsonResponse({ entries: [] })
-        }
-      },
-      })
-      /* register 可能返回 promise；它的拒绝同样要留痕，否则只会表现为"工具莫名消失"。 */
-      if (registered !== undefined && registered !== null && typeof registered.then === 'function') {
-        registered.then(
-          () => reportLoad('route', 'registered'),
-          (error) => reportLoad('route', 'failed: ' + (error instanceof Error ? error.message : String(error))),
-        )
-        return () => {
-          try {
-            if (typeof registered.dispose === 'function') registered.dispose()
-          } catch {}
-        }
-      }
-      reportLoad('route', 'registered')
-      return () => {
-        try {
-          if (typeof registered === 'function') registered()
-        } catch {}
-      }
-    }, 'dsh-next-steps: actions route')
-    return true
-  } catch (error) {
-    reportLoad('route', 'failed-sync: ' + (error instanceof Error ? error.message : String(error)))
-    return false
-  }
-}
-
-export { apply, inject, installRoute, name, normalizeActions }
+export { apply, inject, name, normalizeActions }

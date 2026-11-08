@@ -3,7 +3,7 @@
  *
  * 数据只走一条路：这一轮自己的工具结果。**没有共享 Map、没有 render 副作用、
  * 没有跨组件传递**——每个轮次尾部只回答一个纯问题：
- *   「在 (本轮起点, 本轮收尾] 之间，有没有一条 next_steps 结果？」
+ *   「在 (本轮起点, 本轮收尾] 之间，有没有一条 suggest_actions 结果？」
  * 因此历史轮次各自定格在自己的建议上，晚到的结果也会触发重渲染。
  *
  * 轮次边界来自宿主的 TurnTailOwnerProps：`turn.start.seq` / `turn.end.seq`，
@@ -248,30 +248,6 @@ window.__ModuleLoader__.load({
      * 提交与填入
      * ------------------------------------------------------------------ */
 
-    /**
-     * PTC 会话的兜底：工具在程序内部被调用时，结果进不了顶层工具结果行，
-     * 客户端只能从这条路把 actions 取回来。取不到就当没有——不影响任何渲染。
-     */
-    const ACTIONS_URL = '/api/dsh-next-steps/actions'
-    const remoteCache = new Map()
-
-    async function fetchRemoteActions(sessionId) {
-      try {
-        const response = await fetch(ACTIONS_URL + '?session=' + encodeURIComponent(sessionId), {
-          headers: { accept: 'application/json' },
-        })
-        if (response === undefined || response === null || response.ok !== true) return null
-        const data = await response.json()
-        const entries = Array.isArray(data === null || data === undefined ? undefined : data.entries) ? data.entries : []
-        if (entries.length === 0) return null
-        const entry = entries[entries.length - 1]
-        if (entry === null || typeof entry !== 'object' || !Array.isArray(entry.actions) || entry.actions.length === 0) return null
-        return { mode: entry.mode === 'all' ? 'all' : 'latest', actions: entry.actions }
-      } catch {
-        return null
-      }
-    }
-
     function composerShell(ctx, sessionId) {
       try {
         const conversation = ctx.get('conversation')
@@ -479,42 +455,10 @@ window.__ModuleLoader__.load({
           if (payload !== null) rememberTail(sessionId, endSeq, payload)
         }, [payload, sessionId, endSeq])
 
-        /* 节点通路拿不到时，才去问一次路由；只在最后一轮问，避免每轮都打请求。 */
-        const [remote, setRemote] = React.useState(null)
-        const needRemote = resolved === null && endSeq !== undefined && endSeq === latestEnd && sessionId !== ''
-        React.useEffect(() => {
-          if (!needRemote) return undefined
-          const cacheKey = sessionId + ':' + endSeq
-          const cached = remoteCache.get(cacheKey)
-          if (cached !== undefined) {
-            setRemote({ endSeq, mode: cached.mode, actions: cached.actions })
-            return undefined
-          }
-          let alive = true
-          fetchRemoteActions(sessionId).then((entry) => {
-            if (!alive || entry === null) return
-            if (remoteCache.size > 50) {
-              const oldest = remoteCache.keys().next()
-              if (oldest.done !== true) remoteCache.delete(oldest.value)
-            }
-            remoteCache.set(cacheKey, entry)
-            setRemote({ endSeq, mode: entry.mode, actions: entry.actions })
-          })
-          return () => {
-            alive = false
-          }
-        }, [needRemote, sessionId, endSeq])
+        if (resolved === null || resolved.actions.length === 0) return null
+        if (resolved.mode === 'latest' && latestEnd !== undefined && endSeq !== latestEnd) return null
 
-        const effective = resolved !== null && resolved.actions.length > 0
-          ? resolved
-          : remote !== null && remote.endSeq === endSeq
-            ? { mode: remote.mode, actions: remote.actions }
-            : null
-
-        if (effective === null || effective.actions.length === 0) return null
-        if (effective.mode === 'latest' && latestEnd !== undefined && endSeq !== latestEnd) return null
-
-        const items = effective.actions
+        const items = resolved.actions
         const children = items.map((item, position) => {
           const tier = item.recommended === true ? VISIBLE_TIERS.rec : item.angle === 'stop' ? VISIBLE_TIERS.weak : VISIBLE_TIERS.normal
           const span = items.length === 1 || (items.length === 3 && position === 2)
@@ -574,7 +518,7 @@ window.__ModuleLoader__.load({
 
         return h('div', {
           className: 'dns-root',
-          'data-tool': 'next_steps',
+          'data-tool': 'suggest_actions',
           role: 'group',
           'aria-label': t('group.label'),
         },
@@ -606,7 +550,7 @@ window.__ModuleLoader__.load({
         }
         ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
           name: 'tool.call.toolview',
-          key: 'next_steps',
+          key: 'suggest_actions',
         }, Capture))
         ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
           name: 'conversation.chat.turnTail',

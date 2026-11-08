@@ -6,7 +6,7 @@
 
 ## 设计取舍
 
-- **按轮次投影，不共享状态。** 每个轮次尾部只回答一个问题：「在（本轮起点, 本轮收尾] 之间，有没有一条 `next_steps` 结果？」历史轮次各自定格在自己那一组，晚到的结果也会触发重渲染。没有 Map、没有 render 副作用、没有跨组件传递。
+- **按轮次投影，不共享状态。** 每个轮次尾部只回答一个问题：「在（本轮起点, 本轮收尾] 之间，有没有一条 `suggest_actions` 结果？」历史轮次各自定格在自己那一组，晚到的结果也会触发重渲染。没有 Map、没有 render 副作用、没有跨组件传递。
 - **2×2 版式。** 一次最多四条：1 条整宽、2 条一行、3 条末条跨列、4 条标准 2×2。超过四条在 host 侧直接截断，不做"还有 N 条"——那会破坏版式。
 - **三档视觉。** 主推用强调色（DeepSeek 蓝）16% 底 + 55% 描边 + 3px 左座条；常规用主文字色 8% 叠底；`stop` 用 5% 叠底、次级文字。**全部基于主题令牌与 alpha 叠加**，浅色/深色自动跟随，代码里没有一处硬编码颜色。
 - **不突兀。** 不加卡片/边框/阴影，字号比正文小一档、两行截断，圆角与原生按钮同档；和下方「点赞那排」之间用宿主已有的 16px 间距，不额外补边距。
@@ -44,7 +44,7 @@ dsh plugin add dsh-next-steps
 
 ## 为什么某轮可能没有按钮
 
-建议不是插件凭空生成的，它来自**这一轮的工具调用结果**。插件注册一条常驻提示（`prompt: always`，排在系统提示接近末尾的 9899 位），要求模型每轮收尾都调用 `next_steps`——例外只有「纯确认、且没有下一步可做」的那种回复。
+建议不是插件凭空生成的，它来自**这一轮的工具调用结果**。插件注册一条常驻提示（`prompt: always`，排在系统提示接近末尾的 9899 位），要求模型每轮收尾都调用 `suggest_actions`——例外只有「纯确认、且没有下一步可做」的那种回复。
 
 0.1.4 起这条提示只有 6 条规则、约 116 词（早期版本写到 247 词，而且把"发布 release → 更新条目"这种具体流程写了进去，等于过拟合一个场景）：
 
@@ -60,7 +60,7 @@ dsh plugin add dsh-next-steps
 
 ## 原理与兼容
 
-- **Host 半**：注册 `next_steps` 工具，负责清洗（按立场去重、只留一个推荐、推荐置顶、`stop` 沉底、截断到上限），把算好的结果随工具结果一起交给客户端。
+- **Host 半**：注册 `suggest_actions` 工具，负责清洗（按立场去重、只留一个推荐、推荐置顶、`stop` 沉底、截断到上限），把算好的结果随工具结果一起交给客户端。
 - **Client 半**：不注册采集器，只注册 `conversation.chat.turnTail`；用宿主给的 `turn.start.seq` / `turn.end.seq` 定位本轮的工具结果。节点内部形状不是公开契约，所以按「数据段前缀」深搜而不是写死路径；万一认不出来，降级到采集器，且仍然只挂最新一轮。
 - **零依赖**：不 import 任何 `@deepseek-ai/*` 包（本地目录安装时那些包解析不到），工具用明文 JSON Schema 直接注册。
 - 声明 `engines.dsh >= 0.2.2-rc.1`，在 `0.2.2-rc.1` 上验证。
@@ -73,15 +73,6 @@ dsh plugin add dsh-next-steps
 
 代价：清掉站点数据（localStorage）后，历史轮次的建议就真的没了——但只影响历史，不影响新的一轮。
 
-## PTC 会话的兜底通路
-
-PTC（`run_code`）会话里工具在程序内部调用，结果只进 `tool/ptc-dispatch`，**不会**变成顶层工具结果行。实测那个会话的 30 个 `run_code` 结果里，**0 个**含 payload——所以客户端不可能从节点里读出来。
-
-0.1.5 起改用一条最普通的通道：工具的 `execute` 把本轮 actions 记下来（按会话隔离、每个会话保留最近 20 条），客户端用 `GET /api/dsh-next-steps/actions?session=<id>` 取回。
-
-- **失败影响面极小**：路由坏了只是“没有按钮”，不碰会话历史、投影、渲染。
-- **只在最后一轮问一次**，且每个会话有缓存，不发轮询。
-- 局限：PTC 会话目前只覆盖**最后一轮**的推荐（拿不到更早轮次的 seq 归属）。
 ## 已知限制
 
 - 工具结果里那段给客户端读的 JSON（前缀 `dsh-next-steps/v1`）也会进入模型上下文，每次约几百 token。改用 host 的 session projection + `wire.view` 可以消掉，但目前没做。
@@ -109,7 +100,7 @@ Clickable next-step suggestions under each reply: up to four, in a 2x2 grid, and
 
 Suggestions are **projected per turn**: each turn tail reads only its own turn's tool result, so historical turns keep their own set and a new turn never inherits the previous one's buttons.
 
-- **Per-turn projection.** Each turn tail answers one question — *is there a `next_steps` result inside (this turn's start, this turn's end]?* Historical turns keep their own set; late results re-render. No shared map, no render-phase side effects, no cross-component handoff.
+- **Per-turn projection.** Each turn tail answers one question — *is there a `suggest_actions` result inside (this turn's start, this turn's end]?* Historical turns keep their own set; late results re-render. No shared map, no render-phase side effects, no cross-component handoff.
 - **2x2 layout.** One entry spans the row, two sit side by side, three give the last one a full row, four make a clean 2x2. Anything beyond four is truncated host-side.
 - **Three visual tiers.** Recommended: accent colour at 16% fill, 55% outline, 3px left bar. Normal: 8% ink overlay. `stop`: 5% overlay with secondary text. Everything is a theme token plus alpha, so light and dark follow the host with no literal colours.
 - **Quiet by design.** No card, border or shadow; one step below body text, clamped to two lines, same corner radius as native buttons, reusing the host's existing 16px gap.
@@ -129,6 +120,6 @@ In the profile's `cordis.patch.yml`, on this plugin's row:
     prompt: always     # always = register a standing instruction so the tool is called every turn; off = don't
 ```
 
-Suggestions come from the turn's own tool call. With `prompt: always` the model is asked to call `next_steps` at the end of every reply; if a turn still has no call, that turn simply shows nothing — it never borrows the previous turn's buttons.
+Suggestions come from the turn's own tool call. With `prompt: always` the model is asked to call `suggest_actions` at the end of every reply; if a turn still has no call, that turn simply shows nothing — it never borrows the previous turn's buttons.
 
 Requires DSH `>= 0.2.2-rc.1`. Zero dependencies. Only one plugin that adds rows to the turn tail should be enabled at a time. MIT.
