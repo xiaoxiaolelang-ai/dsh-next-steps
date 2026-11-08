@@ -147,14 +147,23 @@ window.__ModuleLoader__.load({
     const TAIL_STORE = 'dsh-next-steps:tails:v1'
     const TAIL_STORE_MAX = 400
 
+    // 内存镜像：localStorage 只有本插件在写，读一次就够。
+    // 没有它的话，每个 tail 每次重渲都要 JSON.parse 整份存储——
+    // 流式生成期间 tail 会反复重渲，那是实打实的卡顿来源。
+    let tailStoreMirror = null
+    // 已经写过的键 → 序列化后的内容；内容没变就不再写盘。
+    const tailStoreWritten = new Map()
+
     function readTailStore() {
+      if (tailStoreMirror !== null) return tailStoreMirror
       try {
         const raw = window.localStorage.getItem(TAIL_STORE)
         const parsed = raw === null ? null : JSON.parse(raw)
-        return parsed !== null && typeof parsed === 'object' ? parsed : {}
+        tailStoreMirror = parsed !== null && typeof parsed === 'object' ? parsed : {}
       } catch {
-        return {}
+        tailStoreMirror = {}
       }
+      return tailStoreMirror
     }
 
     function tailKey(sessionId, endSeq) {
@@ -173,19 +182,28 @@ window.__ModuleLoader__.load({
     function rememberTail(sessionId, endSeq, payload) {
       if (sessionId === '' || typeof endSeq !== 'number' || payload === null) return
       if (!Array.isArray(payload.actions) || payload.actions.length === 0) return
+      const key = tailKey(sessionId, endSeq)
+      const record = {
+        mode: payload.mode === 'all' ? 'all' : 'latest',
+        actions: payload.actions,
+      }
+      const stamp = JSON.stringify(record)
+      // 内容没变就什么都不做：流式期间 tail 会反复重渲，不能每次都写盘。
+      if (tailStoreWritten.get(key) === stamp) return
+      tailStoreWritten.set(key, stamp)
       try {
         const all = readTailStore()
-        all[tailKey(sessionId, endSeq)] = {
-          mode: payload.mode === 'all' ? 'all' : 'latest',
-          actions: payload.actions,
-        }
+        all[key] = record
         const keys = Object.keys(all)
         if (keys.length > TAIL_STORE_MAX) {
-          for (const key of keys.slice(0, keys.length - TAIL_STORE_MAX)) delete all[key]
+          for (const stale of keys.slice(0, keys.length - TAIL_STORE_MAX)) {
+            delete all[stale]
+            tailStoreWritten.delete(stale)
+          }
         }
         window.localStorage.setItem(TAIL_STORE, JSON.stringify(all))
       } catch {
-        // 存不下就只靠当次会话内的通道
+        // 存不下就只靠当次会话内的通道；镜像里留着，本次会话仍可还原
       }
     }
 

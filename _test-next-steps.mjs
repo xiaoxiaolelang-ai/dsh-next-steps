@@ -17,7 +17,21 @@ const React = {
 }
 
 let captured = null
-globalThis.window = { __ModuleLoader__: { load: (entry) => { captured = entry } }, setTimeout: () => 0 }
+const memory = new Map()
+const memoryWrites = { count: 0 }
+globalThis.window = {
+  __ModuleLoader__: { load: (entry) => { captured = entry } },
+  setTimeout: () => 0,
+  localStorage: {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => { memory.set(key, String(value)); memoryWrites.count += 1 },
+    removeItem: (key) => { memory.delete(key) },
+  },
+}
+// 在第一次渲染之前就塞好，插件的内存镜像只会读一次
+memory.set('dsh-next-steps:tails:v1', JSON.stringify({
+  're|40': { mode: 'latest', actions: [{ angle: 'standard', label: 'R1' }] },
+}))
 globalThis.document = { head: { appendChild() {} }, createElement: () => ({ dataset: {}, textContent: '' }) }
 new Function('window', 'document', source)(globalThis.window, globalThis.document)
 
@@ -110,7 +124,7 @@ Capture({ sessionId: 's', callId: 'c1', block: { content: [{ type: 'text', text:
 const empty = { order: [], nodes: new Map() }
 const fbLatest = labelsOf(settled({ sessionId: 's', seq: 60, turn: turnC, useChat: (sel) => sel(empty) }))
 assert.deepEqual(fbLatest, [{ label: 'FB', tier: 'normal', span: '1 / -1' }], '兜底：最新一轮拿到采集值')
-const fbHistoric = settled({ sessionId: 's', seq: 20, turn: turnA, useChat: (sel) => sel(empty) })
+const fbHistoric = settled({ sessionId: 'fb', seq: 20, turn: turnA, useChat: (sel) => sel(empty) })
 assert.equal(fbHistoric, null, '兜底：历史轮次不渲染')
 // 8) 会话隔离：另一个会话更大的 seq 不能把本会话的「最新一轮」判定带偏
 const snapS2 = mk([[15, [{ angle: 'standard', label: 'S2' }]]])
@@ -132,15 +146,6 @@ console.log('OK  会话隔离：s2 独立判定最新一轮')
 console.log('OK  兜底通道：只有最新一轮')
 
 // 10) 重启还原：节点重放认不出数据段时，用按轮次记下的那一份
-const memory = new Map()
-globalThis.window.localStorage = {
-  getItem: (key) => (memory.has(key) ? memory.get(key) : null),
-  setItem: (key, value) => { memory.set(key, String(value)) },
-  removeItem: (key) => { memory.delete(key) },
-}
-memory.set('dsh-next-steps:tails:v1', JSON.stringify({
-  're|40': { mode: 'latest', actions: [{ angle: 'standard', label: 'R1' }] },
-}))
 const noNodes = { order: [], nodes: new Map() }
 assert.deepEqual(
   labelsOf(settled({ sessionId: 're', seq: 40, turn: turnB, useChat: (sel) => sel(noNodes) })),
@@ -163,5 +168,15 @@ settled({ sessionId: 'wr', seq: 40, turn: turnB, useChat: (sel) => sel(liveWrite
 const savedAll = JSON.parse(memory.get('dsh-next-steps:tails:v1') ?? '{}')
 assert.deepEqual(savedAll['wr|40']?.actions?.map((a) => a.label), ['W1'], '实时渲染后必须把本轮建议写进记忆')
 console.log('OK  实时渲染写入轮次记忆')
+
+// 13) 写入去重：同一轮内容没变时不能反复写盘（流式期间 tail 会反复重渲）
+const snapDup = mk([[35, [{ angle: 'standard', label: 'D1' }]]])
+const renderDup = () => settled({ sessionId: 'dup', seq: 40, turn: turnB, useChat: (sel) => sel(snapDup) })
+renderDup()
+const afterFirst = memoryWrites.count
+renderDup()
+renderDup()
+assert.equal(memoryWrites.count, afterFirst, '同一轮重复渲染不得重复写 localStorage')
+console.log('OK  写入去重：内容没变就不写盘')
 
 console.log('\nall checks passed')
