@@ -123,8 +123,6 @@ function apply(ctx, config) {
   const maxActions = Number.isInteger(rawMax) && rawMax > 0 ? rawMax : MAX_ACTIONS
   const history = config?.history === 'all' ? 'all' : 'latest'
 
-  if (typeof installRoute === 'function') installRoute(ctx)
-
   const promptMode = config?.prompt === "off" ? "off" : "always"
   if (promptMode === "always") {
     const systemPrompt = ctx.get("systemPrompt")
@@ -169,7 +167,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.8', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.9', mode: history, actions }),
           },
         ]
       },
@@ -188,6 +186,9 @@ function apply(ctx, config) {
   } catch (error) {
     reportLoad('tool', 'failed: ' + (error instanceof Error ? error.message : String(error)))
   }
+
+  // 放在工具注册之后：注册顺序是这次二分实验里唯一的变量。
+  if (typeof installRoute === 'function') installRoute(ctx)
 }
 
 /**
