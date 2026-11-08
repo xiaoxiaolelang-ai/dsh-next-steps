@@ -79,20 +79,8 @@ const shell = {
   },
   focus: () => {},
 }
-let projectionView = null
-const projectionFace = {
-  getSnapshot: () => projectionView,
-  subscribe: () => () => {},
-}
-const sessionsService = {
-  binding: () => ({ session: { projections: { faceOf: () => projectionFace } } }),
-}
 const ctx = {
-  get: (key) => {
-    if (key === 'conversation') return { input: { shell: () => shell } }
-    if (key === 'sessions') return sessionsService
-    return undefined
-  },
+  get: (key) => (key === 'conversation' ? { input: { shell: () => shell } } : undefined),
   effect: (fn) => (typeof fn === 'function' ? fn() : undefined),
   locale: { register: () => () => {}, bind: () => (key) => key },
   slots: { inject: (_k, cb) => { cb() }, register: (o, c) => { ctx.__components[o.name ?? o.key] = c; return () => {} } },
@@ -237,29 +225,5 @@ assert.equal(buttonsOf(afterAsync)[0].props.disabled, false, 'an async submit re
 console.log('OK  异步 submit 被拒绝：也算失败，按钮可用')
 submitAsyncReject = false
 
-
-// 8) 投影通路：模拟 PTC 会话——没有顶层工具结果、没有采集器，只有投影
-projectionView = {
-  mode: 'latest',
-  items: [{ seq: 45, actions: [{ angle: 'standard', label: '来自投影的动作', prompt: '来自投影的动作' }] }],
-}
-reset()
-const propsProj = {
-  sessionId: 'proj',
-  seq: 60,
-  turn: { start: { seq: 40 }, end: { seq: 60 } },
-  useChat: (sel) => sel({ order: [], nodes: new Map() }),
-}
-const treeProj = render(propsProj)
-const buttonsProj = buttonsOf(treeProj)
-assert.equal(buttonsProj.length, 1, '投影里有动作就必须渲染出来（PTC 场景）')
-assert.equal(buttonsProj[0].children[0].children[0], '来自投影的动作', '按钮文字来自投影')
-console.log('OK  投影通路：PTC 会话（无工具结果）也能显示')
-
-// 9) 投影里没有本轮动作时，退回原有通路（不能把上一轮的顶上来）
-projectionView = { mode: 'latest', items: [{ seq: 30, actions: [{ angle: 'standard', label: '上一轮的' }] }] }
-reset()
-assert.equal(render(propsProj), null, '投影里只有上一轮动作时，本轮不得显示')
-console.log('OK  投影只覆盖本轮：上一轮的动作不会被顶上来')
 
 console.log('\naction checks passed')

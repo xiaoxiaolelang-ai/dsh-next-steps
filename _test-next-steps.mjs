@@ -14,7 +14,6 @@ const React = {
   useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
   useEffect: (fn) => { fn() },
   useSyncExternalStore: (_sub, get) => get(),
-  useCallback: (fn) => fn,
 }
 
 let captured = null
