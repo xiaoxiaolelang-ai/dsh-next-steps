@@ -279,28 +279,56 @@ window.__ModuleLoader__.load({
         : typeof shell.submit === 'function' ? () => shell.submit() : undefined
       if (submit === undefined) throw new Error('composer exposes no submit')
       write(text)
-      let tries = 0
-      const settle = () => {
-        let draft
-        try {
-          draft = shell.state.getSnapshot().draft
-        } catch {
-          draft = undefined
+      // 返回 Promise：submit 在定时器里抛错也要能被上层看到，否则 UI 会显示"已发送"
+      // 而实际什么都没发生，而且按钮再也点不了。
+      return new Promise((resolve) => {
+        let tries = 0
+        const settle = () => {
+          let draft
+          try {
+            draft = shell.state.getSnapshot().draft
+          } catch {
+            draft = undefined
+          }
+          if (draft === text || tries >= 12) {
+            try {
+              submit()
+              resolve({ ok: true })
+            } catch (error) {
+              resolve({ ok: false, error: error instanceof Error ? error.message : String(error) })
+            }
+            return
+          }
+          tries += 1
+          window.setTimeout(settle, 25)
         }
-        if (draft === text || tries >= 12) {
-          submit()
-          return
-        }
-        tries += 1
-        window.setTimeout(settle, 25)
-      }
-      window.setTimeout(settle, 0)
+        window.setTimeout(settle, 0)
+      })
     }
 
+    /** 读输入框里现有的草稿；读不到就当作空。 */
+    function currentDraft(ctx, sessionId) {
+      const shell = composerShell(ctx, sessionId)
+      if (shell === undefined || shell.state === undefined || typeof shell.state.getSnapshot !== 'function') return ''
+      try {
+        const draft = shell.state.getSnapshot().draft
+        return typeof draft === 'string' ? draft : ''
+      } catch {
+        return ''
+      }
+    }
+
+    /**
+     * Shift + 点击：把建议塞进输入框但不发送。
+     * 已有草稿时**追加**而不是覆盖——用户可能已经打了半句话，
+     * 直接替换会把他的内容弄丢。
+     */
     function fillComposer(ctx, sessionId, text) {
       const write = draftWriter(ctx, sessionId)
       if (write === undefined) throw new Error('composer exposes no setDraft')
-      write(text)
+      const existing = currentDraft(ctx, sessionId)
+      const trimmed = existing.replace(/[\s\u3000]+$/, '')
+      write(trimmed === '' ? text : trimmed + '\n' + text)
       const shell = composerShell(ctx, sessionId)
       if (shell !== undefined && typeof shell.focus === 'function') shell.focus()
     }
@@ -450,9 +478,26 @@ window.__ModuleLoader__.load({
                 }
                 setFailure('')
                 setPending(item.label)
-                sendAsUser(ctx, sessionId, text)
-                setSent(item.label)
-                setPending('')
+                let attempt
+                try {
+                  attempt = sendAsUser(ctx, sessionId, text)
+                } catch (error) {
+                  setPending('')
+                  setFailure(error instanceof Error ? error.message : String(error))
+                  return
+                }
+                // 只有真的提交成功才锁按钮；失败就把按钮释放，让用户能重试。
+                attempt.then((result) => {
+                  setPending('')
+                  if (result !== undefined && result !== null && result.ok === true) {
+                    setSent(item.label)
+                    return
+                  }
+                  setFailure(String(result === undefined || result === null ? 'submit failed' : result.error ?? 'submit failed'))
+                }).catch((error) => {
+                  setPending('')
+                  setFailure(error instanceof Error ? error.message : String(error))
+                })
               } catch (error) {
                 setPending('')
                 setFailure(error instanceof Error ? error.message : String(error))
@@ -465,7 +510,12 @@ window.__ModuleLoader__.load({
           children.push(h('p', { key: 'failure', className: 'dns-error' }, `${t('sendFailed')}${failure}`))
         }
 
-        return h('div', { className: 'dns-root', 'data-tool': 'suggest_actions' },
+        return h('div', {
+          className: 'dns-root',
+          'data-tool': 'suggest_actions',
+          role: 'group',
+          'aria-label': t('group.label'),
+        },
           h('div', { className: 'dns-grid' }, children))
       }
     }
@@ -473,10 +523,12 @@ window.__ModuleLoader__.load({
     const zh = {
       sendFailed: '没发出去：',
       hint: '点击发送，Shift+点击只填入输入框',
+      'group.label': '下一步建议',
     }
     const en = {
       sendFailed: 'Could not send: ',
       hint: 'Click to send, Shift+click to fill the composer',
+      'group.label': 'Next steps',
     }
 
     return {
