@@ -167,7 +167,7 @@ function apply(ctx, config) {
             // 这一段只给客户端读：插件配置在客户端拿不到，上限与模式跟着这份算好的
             // 结果一起送达，规则因此只有一份。用户看不见——工具卡片被客户端接管。
             type: 'text',
-            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.9', mode: history, actions }),
+            text: MARKER + '\n' + JSON.stringify({ rev: '0.1.10', mode: history, actions }),
           },
         ]
       },
@@ -178,7 +178,19 @@ function apply(ctx, config) {
       return { shown: actions.length > 0 }
     },
   })
-  reportLoad('tool', 'registered ' + JSON.stringify({
+  let visible = 'n/a'
+  try {
+    const registry = ctx.tools
+    if (typeof registry.get === 'function') visible = registry.get('next_steps') === undefined ? 'global-missing' : 'global-ok'
+    if (typeof registry.definitions === 'function') {
+      const all = registry.definitions()
+      visible += ' defs=' + (Array.isArray(all) ? all.length : '?')
+      visible += ' has=' + (Array.isArray(all) && all.some((d) => d !== null && d !== undefined && d.name === 'next_steps'))
+    }
+  } catch (error) {
+    visible = 'probe-failed: ' + (error instanceof Error ? error.message : String(error))
+  }
+  reportLoad('tool', 'registered ' + visible + ' ' + JSON.stringify({
       hasPrompt: typeof ctx.get === 'function' && ctx.get('systemPrompt') !== undefined,
       hasConnection: typeof ctx.get === 'function' && ctx.get('connection') !== undefined,
       hasTools: typeof ctx.get === 'function' && ctx.get('tools') !== undefined,
